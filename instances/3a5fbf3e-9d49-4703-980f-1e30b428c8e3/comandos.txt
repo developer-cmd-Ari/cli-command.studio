@@ -1,0 +1,2 @@
+#cd C:/Users/Ariel/Documents/script_iniciador && git remote add origin https://github.com/tu-usuario/script_iniciador.git
+
