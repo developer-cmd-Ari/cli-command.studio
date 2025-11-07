@@ -1,0 +1,13 @@
+
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP  && .\venv\Scripts\activate && uvicorn api_login_v10:app --reload --port 8001
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP\api_finanzas && .\venv\Scripts\activate && uvicorn api_finanzas_v2:app --reload --port 8012
+#cd C:\Users\Ariel\Documents\ERP_AGENTE _APP\admin && gemini 
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && uvicorn api_local_v10:app --reload --port 8010
+#cd C:\Users\Ariel\Documents\ERP_AGENTE _APP\admin && python aplicacion_v9.py 
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_bussines_v2:app --reload --port 8006
+cd C:\Users\Ariel\Documents\app_web\my-app && gemini
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_messaging:app --reload --port 8011
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_analisis_diario_v14:app --reload --port 8002
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_de_v64_3:app --reload --port 8000
+cd C:\Users\Ariel\Documents\app_web\my-app && npm start 
+#cd C:\Users\Ariel\Documents\app_web\my-app && set PORT=3001 && npm start 

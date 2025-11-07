@@ -1,0 +1,2 @@
+# Formato: archivo.py | C:\ruta\origen | C:\ruta\destino | C:\ruta\backup
+ejemplo.txt | . | .\destino | .\backup

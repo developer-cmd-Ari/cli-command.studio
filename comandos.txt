@@ -1,0 +1,6 @@
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_login_v5:app --reload --port 8001
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_de_v48:app --reload --port 8000
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_analisis_diario_v3:app --reload --port 8002
+cd /d C:\Users\Ariel\Documents\env_pyqt5 && .\env_pyqt5_py310\Scripts\activate && uvicorn api_localizador:app --port 8004
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_bussines:app --reload --port 8006
+cd /d C:\Users\Ariel\Documents\test_appp && .\venv\Scripts\activate && python aplicacion_v9.py

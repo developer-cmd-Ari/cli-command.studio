@@ -1,0 +1,10 @@
+# Archivo de configuración del Monitor de Cambios
+# Formato: archivo.py | C:\ruta\origen | C:\ruta\destino | C:\ruta\backup
+
+api_analisis_diario_v14.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_bussines_v2.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_de_v64_3.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_finanzas_v2.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_local_v10.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_login_v10.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups
+api_messaging.py | C:/Users/Ariel/Documents/app_web/my-app | C:/Users/Ariel/Documents/ERP_AGENTE _APP | C:/Users/Ariel/Documents/apis_backups

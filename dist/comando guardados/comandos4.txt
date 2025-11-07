@@ -1,0 +1,10 @@
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP  && .\venv\Scripts\activate && uvicorn api_login_v9:app --reload --port 8001
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_de_v64_3:app --reload --port 8000
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_analisis_diario_v14:app --reload --port 8002
+cd C:\Users\Ariel\Documents\test_appp && .\venv\Scripts\activate && python aplicacion_v9.py
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && python categories_manager_v9.py
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && uvicorn api_local_v10:app --reload --port 8010
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_bussines:app --reload --port 8006
+cd C:\Users\Ariel\Documents\app_web\my-app && npm start 
+cd C:\Users\Ariel\Documents\app_web\my-app && gemini
+

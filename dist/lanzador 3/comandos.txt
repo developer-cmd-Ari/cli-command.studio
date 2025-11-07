@@ -1,0 +1,6 @@
+#cd C:\Users\Ariel\Documents\app_admin && npm start
+#cd C:\Users\Ariel\Documents\ERP_AGENTE _APP\admin  && .\venv\Scripts\activate && python categories_manager_v9.py
+cd C:\Users\Ariel\Documents\api_test\api_v64 && .\venv\Scripts\activate && locust -f locustfile.py
+cd C:\Users\Ariel\Documents\api_test\api_v64 && .\venv\Scripts\activate && uvicorn api_de_v64_3:app --reload --port 8000
+cd C:\Users\Ariel\Documents\api_test\api_v64 && gemini
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP  && .\venv\Scripts\activate && uvicorn api_login_v10:app --reload --port 8001

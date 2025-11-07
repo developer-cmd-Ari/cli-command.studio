@@ -1,0 +1,10 @@
+INSTRUCCIONES:
+1. Escribe cada secuencia de comandos en una sola línea.
+2. Usa '&&' para encadenar los comandos (cd, activate, uvicorn/python).
+3. Usa 'cd /d' para asegurar que también cambie la unidad de disco si es necesario (ej. de C: a D:).
+4. Las líneas que comienzan con '#' son ignoradas.
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_login_v5:app --reload --port 8001
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_de_v47:app --reload --port 8000
+cd /d C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_analisis_diario_v3:app --reload --port 8002
+cd /d C:\Users\Ariel\Documents\env_pyqt5 && .\env_pyqt5_py310\Scripts\activate && uvicorn api_localizador:app --port 8004
+cd /d C:\Users\Ariel\Documents\test_appp && .\venv\Scripts\activate && python aplicacion_v9.py

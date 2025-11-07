@@ -1,0 +1,7 @@
+#cd C:\Users\Ariel\Documents\app_web\my-app && npm start 
+#cd C:\Users\Ariel\Documents\api_test && gemini
+
+cd /d C:\Users\Ariel\Documents\api_test\api_login && call venv\Scripts\activate.bat && python api_login_v8.py > api_run.log 2>&1
+
+cd C:\Users\Ariel\Documents\api_test\api_login && venv\Scripts\activate.bat && locust -f locustfile.py --web-port 8001
+cd C:\Users\Ariel\Documents\test_appp && .\venv\Scripts\activate

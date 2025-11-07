@@ -1,0 +1,8 @@
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && uvicorn api_local_v9:app --reload
+
+
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_analisis_diario_v7:app --reload --port 8002
+cd C:\Users\Ariel\Documents\env_pyqt5 && .\env_pyqt5_py310\Scripts\activate && uvicorn api_localizador:app --port 8004
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && uvicorn api_local_v10:app --reload --port 8010
+cd C:\Users\Ariel\Documents\test_appp && .\venv\Scripts\activate && python aplicacion_v9.py
+cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && python categories_manager_v9.py

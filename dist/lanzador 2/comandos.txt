@@ -1,0 +1,3 @@
+#cd C:\Users\Ariel\Documents\ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_bussines_v2:app --reload --port 8006
+cd C:\Users\Ariel\Documents\app_admin && npm start
+cd C:\Users\Ariel\Documents\app_admin && gemini 

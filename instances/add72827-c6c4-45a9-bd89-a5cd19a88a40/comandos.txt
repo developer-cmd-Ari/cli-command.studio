@@ -1,0 +1,1 @@
+cd C:\Users\Ariel\Documents\app_admin && set PORT=3001 && npm start 
