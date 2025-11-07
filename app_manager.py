@@ -306,7 +306,12 @@ class InstanceListItemWidget(QWidget):
         self.led.setProperty("running", is_running)
         self.style().polish(self.led)
         if not is_running:
-            self.set_alarm_state(0, False) # Clear all alarms when stopped
+            # self.set_alarm_state(0, False) # Clear all alarms when stopped
+            self.active_alarms.clear()
+            if self.alarm_timer.isActive():
+                self.alarm_timer.stop()
+                self.led.setProperty("alarm", False)
+                self.style().polish(self.led)
         
         if is_running:
             icon, _ = get_icon_or_text("stop", "S")
