@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QInputDialog, QLabel, QFrame, QListWidgetItem,
     QSizePolicy
 )
-from PySide6.QtCore import Qt, QProcess, QSettings, QSize, QByteArray, Signal
+from PySide6.QtCore import Qt, QProcess, QSettings, QSize, QByteArray, Signal, QTimer
 from PySide6.QtGui import QIcon, QFontDatabase, QPainter, QPixmap, QTextCursor
 from PySide6.QtSvg import QSvgRenderer
 
@@ -239,6 +239,15 @@ QFrame[isHeader="true"] {
     border-radius: 5px;
 }
 
+/* --- NUEVO: Estilos de Alarma --- */
+#OutputConsole[alarm="true"] {
+    background-color: #cc0000; /* Rojo oscuro */
+}
+QLabel#LedIndicator[alarm="true"] {
+    background-color: #ff4500; /* Naranja-Rojo */
+    border: 1px solid #ff6347;
+}
+
 """
 
 # --- NUEVO: Widget Personalizado para la Lista ---
@@ -256,28 +265,28 @@ class InstanceListItemWidget(QWidget):
         self.setObjectName("InstanceItem")
         self.setMinimumHeight(38) # Altura fija para consistencia
         
-        # Usar un QGridLayout para control explícito
+        self.alarm_timer = QTimer(self)
+        self.alarm_timer.setInterval(500)
+        self.alarm_timer.timeout.connect(self._toggle_alarm_style)
+        self.active_alarms = set()
+
         grid_layout = QGridLayout(self)
         grid_layout.setContentsMargins(5, 2, 5, 2)
         grid_layout.setHorizontalSpacing(8)
 
-        # 1. LED (Columna 0)
         self.led = QLabel()
         self.led.setObjectName("LedIndicator")
         grid_layout.addWidget(self.led, 0, 0)
 
-        # 2. Nombre (Columna 1 - Estirable)
         self.name_label = QLabel(instance_name)
         self.name_label.setObjectName("InstanceName")
         grid_layout.addWidget(self.name_label, 0, 1)
 
-        # 3. Botón Play/Stop (Columna 2)
         self.start_stop_button = QPushButton()
         self.start_stop_button.setFocusPolicy(Qt.NoFocus)
         self.start_stop_button.clicked.connect(self.on_button_clicked)
         grid_layout.addWidget(self.start_stop_button, 0, 2)
 
-        # 4. Botón Eliminar (Columna 3)
         self.delete_button = QPushButton()
         self.delete_button.setFocusPolicy(Qt.NoFocus)
         icon, _ = get_icon_or_text("trash", "X")
@@ -286,19 +295,18 @@ class InstanceListItemWidget(QWidget):
         self.delete_button.clicked.connect(self.on_delete_clicked)
         grid_layout.addWidget(self.delete_button, 0, 3)
 
-        # Configurar estiramiento de columnas
-        grid_layout.setColumnStretch(1, 1) # Dar todo el espacio extra a la columna del nombre
+        grid_layout.setColumnStretch(1, 1)
         grid_layout.setColumnMinimumWidth(0, 12)
         grid_layout.setColumnMinimumWidth(2, 28)
         grid_layout.setColumnMinimumWidth(3, 28)
 
-        # Estado inicial
         self.set_running_state(False)
 
     def set_running_state(self, is_running):
-        """Actualiza el LED y el icono del botón."""
         self.led.setProperty("running", is_running)
-        self.style().polish(self.led) # Re-aplica QSS
+        self.style().polish(self.led)
+        if not is_running:
+            self.set_alarm_state(0, False) # Clear all alarms when stopped
         
         if is_running:
             icon, _ = get_icon_or_text("stop", "S")
@@ -308,6 +316,23 @@ class InstanceListItemWidget(QWidget):
             icon, _ = get_icon_or_text("play", "P")
             self.start_stop_button.setIcon(icon)
             self.start_stop_button.setToolTip("Iniciar instancia")
+
+    def set_alarm_state(self, command_index, is_alarming):
+        if is_alarming:
+            self.active_alarms.add(command_index)
+            if not self.alarm_timer.isActive():
+                self.alarm_timer.start()
+        else:
+            self.active_alarms.discard(command_index)
+            if not self.active_alarms and self.alarm_timer.isActive():
+                self.alarm_timer.stop()
+                self.led.setProperty("alarm", False)
+                self.style().polish(self.led)
+
+    def _toggle_alarm_style(self):
+        is_alarm_on = self.led.property("alarm")
+        self.led.setProperty("alarm", not is_alarm_on)
+        self.style().polish(self.led)
 
     def on_button_clicked(self):
         """Maneja el clic en el botón Play/Stop."""
@@ -339,10 +364,16 @@ class ConsoleTabWidget(QWidget):
     stop_requested = Signal(int)
     start_requested = Signal(int)
     restart_requested = Signal(int, str)
+    alarm_triggered = Signal(str, int, bool) # instance_id, command_index, is_alarming
 
     def __init__(self, parent=None):
         super().__init__(parent)
         
+        self.is_in_alarm_state = False
+        self.alarm_timer = QTimer(self)
+        self.alarm_timer.setInterval(500)
+        self.alarm_timer.timeout.connect(self._toggle_alarm_style)
+
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
@@ -363,6 +394,11 @@ class ConsoleTabWidget(QWidget):
         self.btn_edit.clicked.connect(self.toggle_edit_mode)
         self.btn_edit.setObjectName("SecondaryButton")
 
+        self.btn_disable_alarm = QPushButton("Desactivar Alarma")
+        self.btn_disable_alarm.setObjectName("SecondaryButton")
+        self.btn_disable_alarm.clicked.connect(self.disable_alarm)
+        self.btn_disable_alarm.hide()
+
         self.btn_save = QPushButton("Guardar")
         self.btn_save.setIcon(get_icon("save"))
         self.btn_save.clicked.connect(self.on_save_clicked)
@@ -372,6 +408,7 @@ class ConsoleTabWidget(QWidget):
 
         toolbar_layout.addWidget(self.btn_start_stop)
         toolbar_layout.addWidget(self.btn_edit)
+        toolbar_layout.addWidget(self.btn_disable_alarm)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(self.btn_cancel)
         toolbar_layout.addWidget(self.btn_save)
@@ -424,6 +461,7 @@ class ConsoleTabWidget(QWidget):
         if self.btn_start_stop.isChecked():
             self.stop_requested.emit(command_index)
         else:
+            self.reset_alarm_state() # Reset alarm on manual start
             self.start_requested.emit(command_index)
 
     def toggle_edit_mode(self, edit_on):
@@ -479,6 +517,30 @@ class ConsoleTabWidget(QWidget):
             self.input_line.setReadOnly(True)
             self.input_line.setPlaceholderText("Proceso terminado. Presione Iniciar para reactivar.")
             self.btn_edit.setEnabled(True) # Allow editing even when stopped
+
+    def trigger_alarm(self):
+        if self.is_in_alarm_state: return
+        self.is_in_alarm_state = True
+        self.alarm_timer.start()
+        self.btn_disable_alarm.show()
+        self.alarm_triggered.emit(self.property("instance_id"), self.property("command_index"), True)
+
+    def disable_alarm(self):
+        if not self.is_in_alarm_state: return
+        self.is_in_alarm_state = False
+        self.alarm_timer.stop()
+        self.output_console.setProperty("alarm", False)
+        self.style().polish(self.output_console)
+        self.btn_disable_alarm.hide()
+        self.alarm_triggered.emit(self.property("instance_id"), self.property("command_index"), False)
+
+    def reset_alarm_state(self):
+        self.disable_alarm()
+
+    def _toggle_alarm_style(self):
+        is_alarm_on = self.output_console.property("alarm")
+        self.output_console.setProperty("alarm", not is_alarm_on)
+        self.style().polish(self.output_console)
 
 
 # --- Ventana Principal (Modificada) ---
@@ -929,6 +991,9 @@ class InstanceManager(QMainWindow):
         console_widget.stop_requested.connect(self.handle_stop_requested)
         console_widget.start_requested.connect(self.handle_start_requested)
         console_widget.restart_requested.connect(self.handle_restart_requested)
+        console_widget.alarm_triggered.connect(self.handle_alarm_triggered)
+
+        console_widget.reset_alarm_state()
 
         self.console_widgets.setdefault(instance_id, {})[command_index] = console_widget
 
@@ -954,6 +1019,11 @@ class InstanceManager(QMainWindow):
             process.write((command + "\n").encode('utf-8'))
         
         console_widget.set_running_state(True)
+
+    def handle_alarm_triggered(self, instance_id, command_index, is_alarming):
+        if instance_id in self.instance_widgets:
+            instance_widget = self.instance_widgets[instance_id]
+            instance_widget.set_alarm_state(command_index, is_alarming)
 
     def handle_stop_requested(self, command_index):
         if self.current_instance_id and command_index in self.running_processes.get(self.current_instance_id, {}):
@@ -1096,14 +1166,19 @@ class InstanceManager(QMainWindow):
         command_index = process.property("command_index")
 
         if instance_id in self.console_widgets and command_index in self.console_widgets[instance_id]:
-            tab_widget = self.console_widgets[instance_id][command_index]
+            console_widget = self.console_widgets[instance_id][command_index]
             try:
                 data = process.readAllStandardOutput()
                 text = data.data().decode('cp850', errors='replace') 
             except Exception:
                 text = data.data().decode('utf-8', errors='replace')
             
-            tab_widget.add_output(text)
+            console_widget.add_output(text)
+
+            # --- Detección de Alarma ---
+            lower_text = text.lower()
+            if 'traceback' in lower_text or 'error' in lower_text:
+                console_widget.trigger_alarm()
 
     def on_process_finished(self):
         process = self.sender()
