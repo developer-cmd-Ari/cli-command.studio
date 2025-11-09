@@ -1,4 +1,3 @@
-
 import time
 import shutil
 import os
@@ -21,9 +20,8 @@ def cargar_configuracion():
         print("Creando archivo de ejemplo...")
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                f.write("# Formato: archivo.py | C:\ruta\origen | C:\ruta\destino | C:\ruta\backup
-")
-                f.write("ejemplo.txt | . | .\destino | .\backup\n")
+                f.write("# Formato: archivo.py | C:\\\\ruta\\\\origen | C:\\\\ruta\\\\destino | C:\\\\ruta\\\\backup\\n")
+                f.write("ejemplo.txt | . | .\\\\destino | .\\\\backup\\n")
             print("Archivo de ejemplo creado. Edítalo y reinicia el monitor.")
         except Exception as e:
             print(f"No se pudo crear el config.txt: {e}")
@@ -73,7 +71,7 @@ def cargar_configuracion():
 
 def realizar_backup_inicial():
     """Copia el archivo de origen a la carpeta de backup al inicio."""
-    print("\n--- 💾 Iniciando Copia de Seguridad Inicial (Backup) ---")
+    print("\\n--- 💾 Iniciando Copia de Seguridad Inicial (Backup) ---")
     
     for src_path_str, (archivo_nombre, _, ruta_backup) in monitoreo_rutas.items():
         dst_path = ruta_backup / archivo_nombre
@@ -108,7 +106,7 @@ class FileChangeHandler(FileSystemEventHandler):
             
             # --- Proceso de Copia a Destino ---
             dst_path = ruta_destino / archivo_nombre
-            print(f"\n⚙️ Cambio detectado en: {archivo_nombre}")
+            print(f"\\n⚙️ Cambio detectado en: {archivo_nombre}")
             
             try:
                 # 1. Copiar y Reemplazar en la carpeta de DESTINO
@@ -147,12 +145,12 @@ if __name__ == "__main__":
     for ruta_completa in monitoreo_rutas.keys():
         carpetas_a_observar.add(str(Path(ruta_completa).parent.resolve()))
 
-    print(f"\nObservando {len(carpetas_a_observar)} carpetas:")
+    print(f"\\nObservando {len(carpetas_a_observar)} carpetas:")
     for carpeta in carpetas_a_observar:
         print(f"  - {carpeta}")
         observer.schedule(event_handler, carpeta, recursive=True)
 
-    print("\n--- 🤖 Iniciando monitoreo... Presiona CTRL+C para detener. ---")
+    print("\\n--- 🤖 Iniciando monitoreo... Presiona CTRL+C para detener. ---")
     observer.start()
 
     try:

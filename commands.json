@@ -1,0 +1,94 @@
+{
+    "Contenedores": {
+        "Detener un contenedor": {
+            "template": "docker stop [CONTENEDOR_ID]",
+            "info": "<b>¿Qué hace?</b><br>Detiene un contenedor en ejecución.<br><b>Uso:</b> Reemplaza [CONTENEDOR_ID] con el ID o nombre."
+        },
+        "Eliminar forzado": {
+            "template": "docker rm -f [CONTENEDOR_ID]",
+            "info": "<b>¿Qué hace?</b><br>Fuerza la eliminación de un contenedor, incluso si está en ejecución."
+        },
+        "Eliminar un contenedor": {
+            "template": "docker rm [CONTENEDOR_ID]",
+            "info": "<b>¿Qué hace?</b><br>Elimina un contenedor detenido. No puedes eliminar uno en ejecución (primero usa 'stop')."
+        },
+        "Ver activos": {
+            "template": "docker ps",
+            "info": "<b>¿Qué hace?</b><br>Muestra todos los contenedores que están actualmente en ejecución."
+        },
+        "Ver todos": {
+            "template": "docker ps -a",
+            "info": "<b>¿Qué hace?</b><br>Muestra todos los contenedores, incluyendo los que están detenidos (exited)."
+        }
+    },
+    "Imágenes": {
+        "Construir imagen (build)": {
+            "template": "docker build -t [IMAGEN_LOCAL] .",
+            "info": "<b>¿Qué hace?</b><br>Construye una imagen desde el Dockerfile en el directorio actual ('.').<br><b>Uso:</b> Cambia '[IMAGEN_LOCAL]' por el nombre y tag que desees."
+        },
+        "Eliminar imagen": {
+            "template": "docker rmi [ID_O_TAG]",
+            "info": "<b>¿Qué hace?</b><br>Elimina una imagen local.<br><b>Uso:</b> Reemplaza [ID_O_TAG] con el ID o el 'TAG' de la imagen."
+        },
+        "Listar imágenes": {
+            "template": "docker images",
+            "info": "<b>¿Qué hace?</b><br>Muestra todas las imágenes de Docker que tienes descargadas localmente."
+        }
+    },
+    "Push a GitHub (GHCR)": {
+        "1. Login en GHCR": {
+            "template": "docker login ghcr.io -u [TU_USUARIO]",
+            "info": "<b>¿Qué hace?</b><br>Inicia sesión en GitHub Container Registry (GHCR).<br><b>Uso:</b> Pega tu Token (PAT) cuando pida la contraseña. La variable [TU_USUARIO] se rellenará automáticamente."
+        },
+        "2. Etiquetar (Tag) Imagen": {
+            "template": "docker tag [IMAGEN_LOCAL] ghcr.io/[TU_USUARIO]/[IMAGEN_REPO]",
+            "info": "<b>¿Qué hace?</b><br>Etiqueta una imagen local con el formato de GHCR (ghcr.io/[usuario]/[repo])."
+        },
+        "3. Subir (Push) Imagen": {
+            "template": "docker push ghcr.io/[TU_USUARIO]/[IMAGEN_REPO]",
+            "info": "<b>¿Qué hace?</b><br>Sube la imagen etiquetada al GitHub Container Registry."
+        }
+    },
+    "GitHub CLI (gh)": {
+        "Autenticación (login)": {
+            "template": "gh auth login",
+            "info": "<b>¿Qué hace?</b><br>Inicia sesión en tu cuenta de GitHub de forma interactiva. Necesario para usar la mayoría de comandos."
+        },
+        "Clonar Repositorio": {
+            "template": "gh repo clone [REPO_OWNER]/[REPO_NAME] [DIRECTORIO_LOCAL]",
+            "info": "<b>¿Qué hace?</b><br>Clona un repositorio de GitHub.<br><b>Uso:</b> Si omites [DIRECTORIO_LOCAL], clonará en un directorio con el nombre del repositorio."
+        },
+        "Crear Nuevo Issue": {
+            "template": "gh issue create --title \"[ISSUE_TITLE]\" --body \"[ISSUE_BODY]\"",
+            "info": "<b>¿Qué hace?</b><br>Abre una nueva incidencia (Issue) en el repositorio actual."
+        },
+        "Crear Pull Request": {
+            "template": "gh pr create --title \"[PR_TITLE]\" --body \"[PR_BODY]\"",
+            "info": "<b>¿Qué hace?</b><br>Crea un nuevo Pull Request desde la rama actual. Usa --base [RAMA] si quieres cambiar el destino."
+        },
+        "Cerrar Issue": {
+            "template": "gh issue close [ISSUE_NUMBER]",
+            "info": "<b>¿Qué hace?</b><br>Cierra una incidencia específica por su número."
+        },
+        "Hacer Merge de PR": {
+            "template": "gh pr merge [PR_NUMBER] --[MERGE_METHOD]",
+            "info": "<b>¿Qué hace?</b><br>Combina (merge), aplana (squash) o hace rebase de un Pull Request."
+        },
+        "Listar Issues": {
+            "template": "gh issue list --state [ISSUE_STATE] --assignee @me",
+            "info": "<b>¿Qué hace?</b><br>Muestra las incidencias. Usa --state [ESTADO] o --assignee [@usuario]."
+        },
+        "Listar Pull Requests": {
+            "template": "gh pr list --state [PR_STATE]",
+            "info": "<b>¿Qué hace?</b><br>Muestra las solicitudes de extracción abiertas, cerradas o de cualquier estado."
+        },
+        "Ver PR por Número": {
+            "template": "gh pr view [PR_NUMBER]",
+            "info": "<b>¿Qué hace?</b><br>Muestra detalles y estado de un Pull Request específico por su número."
+        },
+        "Ver Estado de Autenticación": {
+            "template": "gh auth status",
+            "info": "<b>¿Qué hace?</b><br>Muestra el estado de tu sesión y qué alcances (scopes) tiene tu token."
+        }
+    }
+}

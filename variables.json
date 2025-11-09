@@ -1,0 +1,143 @@
+{
+    "TU_USUARIO": {
+        "descripcion": "Usuario de GitHub o Docker Hub usado para login y tags.",
+        "valores": [
+            "ariel",
+            "juan",
+            "pedro",
+            "tu_usuario_docker"
+        ],
+        "default": "tu_usuario_docker"
+    },
+    "IMAGEN_REPO": {
+        "descripcion": "Nombre del repositorio en el registry (ej: en GHCR).",
+        "valores": [
+            "mi-app",
+            "mi-backend"
+        ],
+        "default": "mi-app"
+    },
+    "IMAGEN_LOCAL": {
+        "descripcion": "Nombre de la imagen local con tag (ej: app:tag).",
+        "valores": [
+            "mi-app:latest",
+            "backend:1.0"
+        ],
+        "default": "mi-app:latest"
+    },
+    "CONTENEDOR_ID": {
+        "descripcion": "ID o Nombre de un contenedor de Docker.",
+        "valores": [
+            "contenedor_1",
+            "db_postgres"
+        ],
+        "default": "contenedor_1"
+    },
+    "ID_O_TAG": {
+        "descripcion": "ID o Tag de una imagen local de Docker.",
+        "valores": [
+            "imagen_id",
+            "mi-app:latest"
+        ],
+        "default": "mi-app:latest"
+    },
+    "REPO_OWNER": {
+        "descripcion": "Usuario o de la organización dueña del repositorio en GitHub.",
+        "valores": [
+            "mi-organizacion",
+            "tu_usuario_github"
+        ],
+        "default": "tu_usuario_github"
+    },
+    "REPO_NAME": {
+        "descripcion": "Nombre del repositorio a clonar o crear.",
+        "valores": [
+            "front-end-app",
+            "docker-ci-cd"
+        ],
+        "default": "front-end-app"
+    },
+    "DIRECTORIO_LOCAL": {
+        "descripcion": "Directorio local donde se clonará el repositorio (ej: '.')",
+        "valores": [
+            ".",
+            "mi-proyecto-clonado"
+        ],
+        "default": "."
+    },
+    "PR_STATE": {
+        "descripcion": "Estado de la Pull Request o Issue a listar.",
+        "valores": [
+            "open",
+            "closed",
+            "all"
+        ],
+        "default": "open"
+    },
+    "PR_TITLE": {
+        "descripcion": "El título que llevará el nuevo Pull Request.",
+        "valores": [
+            "feat: Nueva funcionalidad X",
+            "fix: Corrección de bug Y"
+        ],
+        "default": "feat: Nueva funcionalidad X"
+    },
+    "PR_BODY": {
+        "descripcion": "La descripción (cuerpo) del Pull Request.",
+        "valores": [
+            "Implementa el ticket #123. Por favor, revisar.",
+            "Requiere revisión de seguridad."
+        ],
+        "default": "Implementa el ticket #123. Por favor, revisar."
+    },
+    "PR_NUMBER": {
+        "descripcion": "El número de Pull Request a ver o fusionar.",
+        "valores": [
+            "1",
+            "2"
+        ],
+        "default": "1"
+    },
+    "MERGE_METHOD": {
+        "descripcion": "El método para fusionar un Pull Request en GitHub.",
+        "valores": [
+            "merge",
+            "squash",
+            "rebase"
+        ],
+        "default": "merge"
+    },
+    "ISSUE_STATE": {
+        "descripcion": "Estado de las Incidencias (Issues) a listar.",
+        "valores": [
+            "all",
+            "closed",
+            "open"
+        ],
+        "default": "open"
+    },
+    "ISSUE_TITLE": {
+        "descripcion": "El título que llevará la nueva Incidencia.",
+        "valores": [
+            "Bug: Error 500 en producción",
+            "Feature: Añadir modo oscuro"
+        ],
+        "default": "Bug: Error 500 en producción"
+    },
+    "ISSUE_BODY": {
+        "descripcion": "La descripción de la Incidencia.",
+        "valores": [
+            "Pasos para reproducir:\n1. ...",
+            "Requerimiento del cliente: ..."
+        ],
+        "default": "Pasos para reproducir:\n1. ..."
+    },
+    "ISSUE_NUMBER": {
+        "descripcion": "El número de la Incidencia a cerrar o ver.",
+        "valores": [
+            "10",
+            "11"
+        ],
+        "default": "10"
+    }
+}

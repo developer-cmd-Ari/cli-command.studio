@@ -1,6 +1,8 @@
 import sys
 import os
 import json
+import subprocess
+import re
 
 # --- Dependencias Requeridas ---
 # (Asegúrate de instalarlas: pip install PySide6 docker cryptography)
@@ -108,8 +110,10 @@ class DockerService:
     """
     def __init__(self):
         self.client = None
-        self.docker_hub_username = None
-        self.docker_hub_logged_in = False
+        # MODIFICADO: Nombres de variables generalizados
+        self.registry_username = None
+        self.registry_password_or_token = None # NUEVO
+        self.registry_logged_in = False
 
     def check_connection(self):
         """Verifica la conexión con el Docker Engine."""
@@ -127,18 +131,21 @@ class DockerService:
             print(f"Error inesperado de conexión: {e}", file=sys.stderr)
             return False, f"Error inesperado: {e}"
 
-    def login_to_docker_hub(self, username, password_or_token, registry="https://index.docker.io/v1/"):
-        """Intenta autenticarse en un registro (Docker Hub por defecto)."""
+    # MODIFICADO: Método generalizado para cualquier registro
+    def login_to_registry(self, registry, username, password_or_token):
+        """Intenta autenticarse en un registro (ej. ghcr.io)."""
         if not self.client:
             return False, "Cliente Docker no inicializado."
         
         try:
             print(f"Intentando login en {registry} como {username}...")
+            # El SDK maneja la URL del registro (ej. 'ghcr.io' o 'https://index.docker.io/v1/')
             self.client.login(username=username, password=password_or_token, registry=registry)
-            self.docker_hub_username = username
-            self.docker_hub_logged_in = True
+            self.registry_username = username
+            self.registry_password_or_token = password_or_token # NUEVO
+            self.registry_logged_in = True
             print("Login exitoso.")
-            return True, "Login en Docker Hub exitoso."
+            return True, f"Login en {registry} exitoso."
         except APIError as e:
             print(f"Error de API al autenticarse: {e}", file=sys.stderr)
             return False, f"Error de autenticación: {e}"
@@ -175,9 +182,9 @@ class DockerService:
         """Retorna el generador/stream de un build para ser consumido en un Hilo."""
         if not self.client: return
         print(f"Iniciando build en {path} con tag {tag}")
-        # Retorna un generador. Debe ser consumido en un QThread.
-        # 'decode=True' convierte los bytes a dicts
-        return self.client.images.build(path=path, tag=tag, rm=True, decode=True)
+        # Usamos la API de bajo nivel para obtener un stream de bytes crudos
+        # y evitar problemas con la decodificación automática del SDK.
+        return self.client.api.build(path=path, tag=tag, rm=True, decode=False)
 
     def get_pull_stream(self, image_name):
         """Retorna el stream de un pull (descarga)."""
@@ -188,15 +195,53 @@ class DockerService:
 
     def get_push_stream(self, image_name_with_tag):
         """Retorna el stream de un push (subida)."""
-        if not self.client or not self.docker_hub_logged_in:
+        if not self.client or not self.registry_logged_in:
             print("Debe estar logueado para hacer push.")
-            # Un generador vacío
-            yield {"error": "No autenticado en Docker Hub."}
+            yield {"error": "No autenticado en el registro."}
             return
 
-        print(f"Iniciando push de {image_name_with_tag}")
-        # Retorna un generador.
-        return self.client.images.push(image_name_with_tag, stream=True, decode=True)
+        auth_config = {
+            "username": self.registry_username,
+            "password": self.registry_password_or_token
+        }
+
+        print(f"Iniciando push de {image_name_with_tag} con auth explícito y decodificación manual.")
+        
+        try:
+            # DECODE=FALSE: Obtenemos bytes crudos para evitar bloqueos en el SDK
+            original_stream = self.client.images.push(
+                image_name_with_tag, 
+                stream=True, 
+                decode=False, 
+                auth_config=auth_config
+            )
+            
+            # Envolvemos el stream para decodificar y añadir depuración
+            def stream_wrapper(stream):
+                print("DEBUG: Wrapper: Verificando el stream de Docker (bytes)...", flush=True)
+                had_items = False
+                for chunk in stream:
+                    had_items = True
+                    try:
+                        # Un chunk puede tener múltiples JSONs separados por \r\n
+                        lines = chunk.decode('utf-8').splitlines()
+                        for line in lines:
+                            if line:
+                                item = json.loads(line)
+                                yield item
+                    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+                        print(f"DEBUG: Wrapper: No se pudo decodificar el chunk: {chunk}, error: {e}", flush=True)
+
+                if not had_items:
+                    print("DEBUG: Wrapper: ¡ALERTA! El stream de Docker estaba vacío.", flush=True)
+                    yield {"error": "El motor de Docker no devolvió información de progreso. Causa probable: error de red, firewall o un bug en Docker."}
+                print("DEBUG: Wrapper: Fin del stream.", flush=True)
+
+            return stream_wrapper(original_stream)
+
+        except Exception as e:
+            print(f"DEBUG: Excepción al llamar a client.images.push(): {e}", flush=True)
+            yield {"error": f"Excepción al iniciar el push: {e}"}
 
     def run_container(self, image_name):
         """Intenta ejecutar un contenedor en modo detached."""
@@ -210,6 +255,45 @@ class DockerService:
             return False, f"Error de API al iniciar {image_name}: {e}"
         except Exception as e:
             return False, f"Error inesperado: {e}"
+
+    def tag_image(self, image_id_or_tag, new_tag_full):
+        """Añade un nuevo tag a una imagen existente."""
+        if not self.client: return False, "Cliente no inicializado"
+        try:
+            # Parsear el tag completo en repositorio y etiqueta
+            repo_part, tag_part = (None, None)
+            if ':' in new_tag_full:
+                parts = new_tag_full.rsplit(':', 1)
+                # Una comprobación simple: si la parte después de los dos puntos contiene '/',
+                # es probable que sea parte de una ruta con un puerto, no una etiqueta.
+                if '/' in parts[1]:
+                    repo_part = new_tag_full
+                    tag_part = 'latest'
+                else:
+                    repo_part = parts[0]
+                    tag_part = parts[1]
+            else:
+                repo_part = new_tag_full
+                tag_part = 'latest'
+
+            print(f"DEBUG: Tagging with repo='{repo_part}' and tag='{tag_part}'")
+            image = self.client.images.get(image_id_or_tag)
+            success = image.tag(repository=repo_part, tag=tag_part)
+            
+            if success:
+                return True, f"Imagen {image_id_or_tag} tageada como {new_tag_full}."
+            else:
+                # Es poco probable llegar aquí, ya que un fallo suele lanzar una excepción.
+                return False, f"No se pudo tagear la imagen. Verifique que el tag no esté en uso."
+
+        except docker.errors.ImageNotFound:
+            return False, f"Error: Imagen '{image_id_or_tag}' no encontrada."
+        except APIError as e:
+            return False, f"Error de API al tagear: {e}"
+        except ValueError:
+            return False, f"Error: El formato del nuevo tag '{new_tag_full}' es inválido."
+        except Exception as e:
+            return False, f"Error inesperado al tagear: {e}"
 
     # --- Operaciones con Contenedores ---
 
@@ -416,38 +500,57 @@ class Worker(QRunnable):
 
     @Slot()
     def run(self):
+        print(f"DEBUG: Worker.run: Entered for function '{self.fn.__name__}'.", flush=True)
         try:
             result = self.fn(*self.args, **self.kwargs)
-            
+            print(f"DEBUG: Worker.run: Function '{self.fn.__name__}' executed, got result: {result}", flush=True)
+
             if hasattr(result, '__next__') and hasattr(result, '__iter__'):
+                print(f"DEBUG: Worker.run: Result is a generator. Iterating...", flush=True)
                 # Es un generador (stream)
+                item_count = 0
                 for progress_data in result:
+                    item_count += 1
+                    print(f"DEBUG: Worker.run: Emitting progress signal for item {item_count}.", flush=True)
                     self.signals.progress.emit(progress_data)
+                
+                if item_count == 0:
+                    print("DEBUG: Worker.run: WARNING - The stream/generator was empty.", flush=True)
+
+                print("DEBUG: Worker.run: Generator finished. Emitting 'finished' signal.", flush=True)
                 self.signals.finished.emit(None) 
             else:
                 # Es un resultado normal
+                print("DEBUG: Worker.run: Result is not a generator. Emitting 'finished' signal.", flush=True)
                 self.signals.finished.emit(result)
                 
         except Exception as e:
-            print(f"Error en el worker: {e}")
+            print(f"DEBUG: Worker.run: Exception caught: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
             self.signals.error.emit(str(e))
+        finally:
+            print(f"DEBUG: Worker.run: Exiting for function '{self.fn.__name__}'.", flush=True)
 
 
 # --- Diálogo de Inicio de Sesión (Login) ---
 class LoginDialog(QDialog):
-    """Diálogo modal para solicitar credenciales de Docker Hub."""
+    """Diálogo modal para solicitar credenciales del registro."""
     
-    def __init__(self, docker_service, config_manager, parent=None):
+    # MODIFICADO: Aceptar la URL del registro
+    def __init__(self, docker_service, config_manager, registry_url, parent=None):
         super().__init__(parent)
         self.docker_service = docker_service
         self.config_manager = config_manager
+        self.registry_url = registry_url # NUEVO
         
-        self.setWindowTitle("Login de Docker Hub")
+        # MODIFICADO: Título dinámico
+        self.setWindowTitle(f"Login de Registro ({self.registry_url})")
         self.setMinimumWidth(350)
         self.setModal(True)
         
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Nombre de usuario")
+        self.username_input.setPlaceholderText("Nombre de usuario (ej. tu-usuario-github)")
         
         self.token_input = QLineEdit()
         self.token_input.setPlaceholderText("Token de Acceso Personal (PAT)")
@@ -458,7 +561,7 @@ class LoginDialog(QDialog):
         self.status_label.setStyleSheet("color: #ffcccc;")
 
         info_label = QLabel(
-            "Se recomienda usar un Token de Acceso Personal (PAT) en lugar de tu contraseña."
+            "Se recomienda usar un Token de Acceso Personal (PAT) con permisos 'read:packages' y 'write:packages'."
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet("font-size: 9pt; color: #aaaaaa;")
@@ -483,9 +586,10 @@ class LoginDialog(QDialog):
             return
 
         self.login_button.setEnabled(False)
-        self.status_label.setText("Autenticando...")
+        self.status_label.setText(f"Autenticando en {self.registry_url}...")
         
-        worker = Worker(self.docker_service.login_to_docker_hub, username, token)
+        # MODIFICADO: Llamar al método generalizado
+        worker = Worker(self.docker_service.login_to_registry, self.registry_url, username, token)
         worker.signals.finished.connect(self.on_login_finished)
         worker.signals.error.connect(self.on_login_error)
         self.threadpool.start(worker)
@@ -513,7 +617,7 @@ class LoginDialog(QDialog):
         self.login_button.setEnabled(True)
 
 
-# --- Diálogo para Crear Dockerfile (NUEVO) ---
+# --- Diálogo para Crear Dockerfile (SIN CAMBIOS) ---
 class CreateDockerfileDialog(QDialog):
     """Diálogo para generar un Dockerfile básico para una app Python."""
     
@@ -614,1603 +718,802 @@ CMD [\"{run_cmd}\"]
 
 
 # --- Widget Principal del Dashboard ---
-
-
 class DockerManagerWidget(QWidget):
-
-
     
-
-
-    def __init__(self, docker_service, config_manager, parent=None):
-
-
+    # MODIFICADO: Aceptar la URL del registro
+    def __init__(self, docker_service, config_manager, registry_url, parent=None):
         super().__init__(parent)
-
-
         self.docker_service = docker_service
-
-
         self.config_manager = config_manager
-
-
+        self.registry_url = registry_url # NUEVO
         self.threadpool = QThreadPool()
-
-
-
-
+        self.current_op_has_error = False # Flag para rastrear errores en streams
+        self.detected_repo_name = None # Para el nombre del repo detectado por git
 
         self.create_widgets()
-
-
         self.create_layout()
-
-
         
-
-
         self.load_containers_async()
-
-
         self.load_images_async()
 
-
-
-
-
     def create_widgets(self):
-
-
         """Crea todos los widgets que se usarán en la UI."""
-
-
         
-
-
         # --- 1. Panel de Navegación ---
-
-
         self.nav_list = QListWidget()
-
-
         self.nav_list.setFixedWidth(200)
-
-
         self.nav_list.setIconSize(QSize(24, 24))
-
-
         
-
-
         QListWidgetItem(get_icon("home"), "Home", self.nav_list)
-
-
         QListWidgetItem(get_icon("image"), "Imágenes", self.nav_list)
-
-
         QListWidgetItem(get_icon("container"), "Contenedores", self.nav_list)
-
-
         QListWidgetItem(get_icon("logs"), "Logs y Build", self.nav_list)
-
-
         QListWidgetItem(get_icon("settings"), "Configuración", self.nav_list)
-
-
         
-
-
         self.nav_list.setCurrentRow(0)
 
-
-
-
-
         # --- 2. Stack de Páginas ---
-
-
         self.main_stack = QStackedWidget()
-
-
         self.main_stack.addWidget(self.create_home_page())
-
-
         self.main_stack.addWidget(self.create_images_page())
-
-
         self.main_stack.addWidget(self.create_containers_page())
-
-
         self.main_stack.addWidget(self.create_logs_page())
-
-
         self.main_stack.addWidget(self.create_settings_page())
-
-
         
-
-
         # --- 3. Conexión de Navegación ---
-
-
         self.nav_list.currentRowChanged.connect(self.main_stack.setCurrentIndex)
 
-
-
-
-
     def create_layout(self):
-
-
         """Organiza los widgets principales en la ventana."""
-
-
         main_layout = QHBoxLayout()
-
-
         main_layout.addWidget(self.nav_list)
-
-
         main_layout.addWidget(self.main_stack)
-
-
         
-
-
         self.setLayout(main_layout)
-
-
-
-
 
     # --- Constructores de Páginas ---
 
-
-
-
-
     def create_home_page(self):
-
-
         page = QWidget()
-
-
         layout = QVBoxLayout(page)
-
-
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-
         
-
-
         title = QLabel("Bienvenido a DockerVizion")
-
-
         title.setStyleSheet("font-size: 20pt; font-weight: bold; margin-bottom: 10px;")
-
-
         layout.addWidget(title)
-
-
         
-
-
         status = "Conectado a Docker Engine." if self.docker_service.client else "Error: No conectado a Docker."
-
-
         layout.addWidget(QLabel(status))
-
-
         
-
-
-        login_status = (f"Autenticado en Docker Hub como: {self.docker_service.docker_hub_username}" 
-
-
-                        if self.docker_service.docker_hub_logged_in 
-
-
-                        else "No autenticado en Docker Hub.")
-
-
+        # MODIFICADO: Usar variables y texto de registro general
+        login_status = (f"Autenticado en {self.registry_url} como: {self.docker_service.registry_username}" 
+                        if self.docker_service.registry_logged_in 
+                        else f"No autenticado en {self.registry_url}.")
         layout.addWidget(QLabel(login_status))
-
-
         
-
-
         return page
-
-
-
-
 
     def create_images_page(self):
-
-
         page = QWidget()
-
-
         layout = QVBoxLayout(page)
-
-
         layout.setContentsMargins(0, 0, 0, 0)
-
-
         
-
-
         toolbar = QHBoxLayout()
-
-
         self.btn_create_dockerfile = QPushButton(get_icon("info"), "Crear Dockerfile...")
-
-
         self.btn_build = QPushButton(get_icon("info"), "Buildear Imagen...")
-
-
+        self.btn_push = QPushButton(get_icon("info"), "Subir (Push)...")
         self.btn_pull = QPushButton(get_icon("info"), "Descargar (Pull)...")
-
-
         self.btn_refresh_images = QPushButton(get_icon("info"), "Refrescar")
-
-
         
-
-
         toolbar.addWidget(self.btn_create_dockerfile)
-
-
         toolbar.addWidget(self.btn_build)
-
-
+        toolbar.addWidget(self.btn_push)
         toolbar.addWidget(self.btn_pull)
-
-
         toolbar.addWidget(self.btn_refresh_images)
-
-
         toolbar.addStretch()
-
-
         layout.addLayout(toolbar)
-
-
         
-
-
         # Conexiones
-
-
         self.btn_create_dockerfile.clicked.connect(self.handle_create_dockerfile_standalone)
-
-
         self.btn_build.clicked.connect(self.handle_build_image)
-
-
+        self.btn_push.clicked.connect(self.handle_push_image)
         self.btn_pull.clicked.connect(self.handle_pull_image)
-
-
         self.btn_refresh_images.clicked.connect(self.load_images_async)
-
-
         
-
-
         self.images_table = QTableView()
-
-
         self.images_table.setSortingEnabled(True)
-
-
         self.images_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-
-
         self.images_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-
-
         self.images_model = QStandardItemModel()
-
-
         self.images_model.setHorizontalHeaderLabels(["ID", "Tags", "Tamaño (MB)", "Creada"])
-
-
         self.images_table.setModel(self.images_model)
-
-
         self.images_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-
         self.images_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-
-
         layout.addWidget(self.images_table)
-
-
         
-
-
         return page
-
-
-
-
 
     def create_containers_page(self):
-
-
         page = QWidget()
-
-
         layout = QVBoxLayout(page)
-
-
         layout.setContentsMargins(0, 0, 0, 0)
 
-
-
-
-
         toolbar = QHBoxLayout()
-
-
         self.btn_run = QPushButton(get_icon("info"), "Levantar (Run)...")
-
-
         self.btn_refresh_containers = QPushButton(get_icon("info"), "Refrescar")
-
-
         
-
-
         toolbar.addWidget(self.btn_run)
-
-
         toolbar.addWidget(self.btn_refresh_containers)
-
-
         toolbar.addStretch()
-
-
         layout.addLayout(toolbar)
-
-
         
-
-
         # Conexiones Toolbar
-
-
         self.btn_run.clicked.connect(self.handle_run_container)
-
-
         self.btn_refresh_containers.clicked.connect(self.load_containers_async)
 
-
-
-
-
         self.containers_table = QTableView()
-
-
         self.containers_table.setSortingEnabled(True)
-
-
         self.containers_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-
-
         self.containers_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-
-
         self.containers_model = QStandardItemModel()
-
-
         self.containers_model.setHorizontalHeaderLabels(["ID", "Nombre", "Imagen", "Estado", "Puertos"])
-
-
         self.containers_table.setModel(self.containers_model)
-
-
         self.containers_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-
-
         layout.addWidget(self.containers_table)
-
-
         
-
-
         action_toolbar = QHBoxLayout()
-
-
         self.btn_view_logs = QPushButton("Ver Logs")
-
-
         self.btn_view_metrics = QPushButton("Ver Métricas")
-
-
         self.btn_stop_container = QPushButton("Detener (Stop)")
-
-
         self.btn_remove_container = QPushButton("Eliminar (Remove)")
 
-
-
-
-
         action_toolbar.addWidget(self.btn_view_logs)
-
-
         action_toolbar.addWidget(self.btn_view_metrics)
-
-
         action_toolbar.addWidget(self.btn_stop_container)
-
-
         action_toolbar.addWidget(self.btn_remove_container)
-
-
         action_toolbar.addStretch()
-
-
         layout.addLayout(action_toolbar)
-
-
         
-
-
         # Conexiones Action Toolbar
-
-
         self.btn_view_logs.clicked.connect(self.handle_view_logs)
-
-
         self.btn_view_metrics.clicked.connect(self.handle_view_metrics)
-
-
         self.btn_stop_container.clicked.connect(self.handle_stop_container)
-
-
         self.btn_remove_container.clicked.connect(self.handle_remove_container)
-
-
         
-
-
         return page
-
-
-
-
 
     def create_logs_page(self):
-
-
         page = QWidget()
-
-
         layout = QVBoxLayout(page)
-
-
         layout.addWidget(QLabel("Logs de Build / Contenedor en Tiempo Real"))
-
-
         
-
-
         self.logs_output = QTextEdit()
-
-
         self.logs_output.setReadOnly(True)
-
-
         layout.addWidget(self.logs_output)
-
-
         
-
-
         self.logs_output.append("--- Panel de Logs listo ---")
-
-
         
-
-
         return page
-
-
-
-
 
     def create_settings_page(self):
-
-
         page = QWidget()
-
-
         layout = QFormLayout(page)
-
-
         layout.setSpacing(10)
-
-
         
-
-
         title = QLabel("Configuración")
-
-
         title.setStyleSheet("font-size: 16pt; font-weight: bold;")
-
-
         layout.addRow(title)
-
-
         
-
-
         creds = self.config_manager.load_credentials()
-
-
         username = creds['username'] if creds else "N/A"
-
-
         token = ("*" * len(creds['token'])) if creds else "N/A"
-
-
         
-
-
-        layout.addRow("Usuario Docker Hub:", QLabel(username))
-
-
+        # MODIFICADO: Textos para el registro general
+        layout.addRow(f"Usuario ({self.registry_url}):", QLabel(username))
         layout.addRow("Token guardado:", QLabel(token))
-
-
         
-
-
         change_creds_button = QPushButton("Cambiar/Actualizar Credenciales")
-
-
         change_creds_button.clicked.connect(self.show_login_dialog_force)
-
-
         layout.addRow(change_creds_button)
 
+        # Separador
+        separator = QWidget()
+        separator.setFixedHeight(20)
+        layout.addRow(separator)
 
+        repo_title = QLabel("Repositorio Enlazado")
+        repo_title.setStyleSheet("font-size: 12pt; font-weight: bold;")
+        layout.addRow(repo_title)
 
+        self.linked_repo_label = QLabel(self.detected_repo_name or "Ninguno")
+        layout.addRow("Nombre del Repositorio:", self.linked_repo_label)
 
+        link_repo_button = QPushButton("Enlazar Carpeta de Repositorio...")
+        link_repo_button.clicked.connect(self.handle_link_repo_folder)
+        layout.addRow(link_repo_button)
 
         return page
-
-
-
-
 
     # --- Lógica Asíncrona (Carga de datos) ---
 
-
-
-
-
     def load_images_async(self):
-
-
         """Carga la lista de imágenes en un hilo de trabajo."""
-
-
         worker = Worker(self.docker_service.list_images)
-
-
         worker.signals.finished.connect(self.update_images_table)
-
-
         worker.signals.error.connect(self.log_error)
-
-
         self.threadpool.start(worker)
 
-
-
-
-
     @Slot(object)
-
-
     def update_images_table(self, images_list):
-
-
         """Actualiza la QTableView de imágenes con los datos recibidos."""
-
-
         self.images_model.clear()
-
-
         self.images_model.setHorizontalHeaderLabels(["ID", "Tags", "Tamaño (MB)", "Creada"])
-
-
         for img in images_list:
-
-
             row = [
-
-
                 QStandardItem(img["id"]),
-
-
                 QStandardItem(img["tags"]),
-
-
                 QStandardItem(img["size_mb"]),
-
-
                 QStandardItem(img["created"])
-
-
             ]
-
-
             self.images_model.appendRow(row)
-
-
         self.log_to_panel(f"Tabla de imágenes actualizada. {len(images_list)} imágenes encontradas.")
 
-
-
-
-
     def load_containers_async(self):
-
-
         """Carga la lista de contenedores en un hilo de trabajo."""
-
-
         worker = Worker(self.docker_service.list_containers)
-
-
         worker.signals.finished.connect(self.update_containers_table)
-
-
         worker.signals.error.connect(self.log_error)
-
-
         self.threadpool.start(worker)
 
-
-
-
-
     @Slot(object)
-
-
     def update_containers_table(self, containers_list):
-
-
         """Actualiza la QTableView de contenedores."""
-
-
         self.containers_model.clear()
-
-
         self.containers_model.setHorizontalHeaderLabels(["ID", "Nombre", "Imagen", "Estado", "Puertos"])
-
-
         for c in containers_list:
-
-
             row = [
-
-
                 QStandardItem(c["id"]),
-
-
                 QStandardItem(c["name"]),
-
-
                 QStandardItem(c["image"]),
-
-
                 QStandardItem(c["status"]),
-
-
                 QStandardItem(c["ports"])
-
-
             ]
-
-
             # Colorear según estado
-
-
             if c["status"].startswith("running"):
-
-
                 row[3].setForeground(Qt.GlobalColor.green)
-
-
             elif c["status"].startswith("exited"):
-
-
                 row[3].setForeground(Qt.GlobalColor.gray)
-
-
             self.containers_model.appendRow(row)
-
-
         self.log_to_panel(f"Tabla de contenedores actualizada. {len(containers_list)} contenedores encontrados.")
 
-
-
-
-
-    # --- Manejadores de Acciones (NUEVO) ---
-
-
+    # --- Manejadores de Acciones ---
     
-
-
     def _get_selected_container_id(self):
-
-
         """Helper para obtener el ID del contenedor seleccionado en la tabla."""
-
-
         indexes = self.containers_table.selectionModel().selectedRows()
-
-
         if not indexes:
-
-
             self.log_to_panel("Por favor, seleccione un contenedor de la tabla.", "orange")
-
-
             return None
-
-
         
-
-
         selected_row = indexes[0].row()
-
-
         # Asumiendo que la Columna 0 es el ID
-
-
         id_item = self.containers_model.item(selected_row, 0)
-
-
         return id_item.text()
 
-
-
-
+    def _get_selected_image_details(self):
+        """Helper para obtener ID y tags de la imagen seleccionada."""
+        indexes = self.images_table.selectionModel().selectedRows()
+        if not indexes:
+            self.log_to_panel("Por favor, seleccione una imagen de la tabla.", "orange")
+            return None, None
+        
+        selected_row = indexes[0].row()
+        # Columna 0 es "ID", Columna 1 es "Tags"
+        id_item = self.images_model.item(selected_row, 0)
+        tags_item = self.images_model.item(selected_row, 1)
+        
+        return id_item.text(), tags_item.text()
 
     def handle_create_dockerfile_standalone(self):
-
-
         """Muestra un diálogo para seleccionar una carpeta y luego crear un Dockerfile."""
-
-
         path = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta para crear Dockerfile")
-
-
         if not path:
-
-
             return  # Usuario canceló
-
-
-
-
 
         # Verificar si ya existe un Dockerfile
-
-
         dockerfile_path = os.path.join(path, "Dockerfile")
-
-
         if os.path.exists(dockerfile_path):
-
-
             reply = QMessageBox.question(self, "Dockerfile ya existe",
-
-
                                          "Ya existe un Dockerfile en esta carpeta.\n"
-
-
                                          "¿Desea sobrescribirlo?",
-
-
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-
-
                                          QMessageBox.StandardButton.No)
-
-
             if reply == QMessageBox.StandardButton.No:
-
-
                 self.log_to_panel("Creación de Dockerfile cancelada.", "yellow")
-
-
                 return
 
-
-
-
-
         create_dialog = CreateDockerfileDialog(path, self)
-
-
         if create_dialog.exec() == QDialog.DialogCode.Accepted:
-
-
             self.log_to_panel(f"Dockerfile creado exitosamente en {path}", "green")
-
-
         else:
-
-
             self.log_to_panel("Creación de Dockerfile cancelada.", "yellow")
 
+    def _get_repo_name_from_path(self, path):
+        """
+        Intenta obtener el nombre del repositorio de GitHub desde la URL del remoto 'origin'.
+        """
+        try:
+            command = ["git", "config", "--get", "remote.origin.url"]
+            result = subprocess.run(
+                command,
+                cwd=path,
+                capture_output=True,
+                text=True,
+                check=False,
+                encoding='utf-8'
+            )
 
+            if result.returncode != 0:
+                print(f"Git command failed: {result.stderr.strip()}")
+                return None
 
+            remote_url = result.stdout.strip()
+            match = re.search(r'(?:github\.com/|github\.com:)([\w-]+/[\w.-]+)', remote_url)
 
+            if match:
+                full_repo_path = match.group(1)
+                if full_repo_path.endswith('.git'):
+                    full_repo_path = full_repo_path[:-4]
+                
+                repo_name = full_repo_path.split('/')[-1]
+                return repo_name
+
+        except FileNotFoundError:
+            self.log_to_panel("Comando 'git' no encontrado. No se puede detectar el nombre del repositorio.", "orange")
+            return None
+        except Exception as e:
+            self.log_to_panel(f"Error al detectar el repositorio: {e}", "red")
+            return None
+        
+        return None
 
     def handle_build_image(self):
-
-
         """Muestra diálogos para seleccionar carpeta y tag, luego inicia el build."""
-
-
         path = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta con Dockerfile")
-
-
         if not path:
-
-
             return  # Usuario canceló
-
-
-
-
 
         dockerfile_path = os.path.join(path, "Dockerfile")
-
-
         
-
-
         # Si no existe el Dockerfile, preguntar para crearlo
-
-
         if not os.path.exists(dockerfile_path):
-
-
             reply = QMessageBox.question(self, "Dockerfile no encontrado",
-
-
                                          "No se encontró un Dockerfile en la carpeta seleccionada.\n"
-
-
                                          "¿Desea crear uno ahora?",
-
-
                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-
-
                                          QMessageBox.StandardButton.No)
-
-
             
-
-
             if reply == QMessageBox.StandardButton.Yes:
-
-
                 create_dialog = CreateDockerfileDialog(path, self)
-
-
                 if create_dialog.exec() != QDialog.DialogCode.Accepted:
-
-
                     self.log_to_panel("Creación de Dockerfile cancelada.", "yellow")
-
-
                     return # El usuario canceló la creación
-
-
             else:
-
-
                 self.log_to_panel("Build cancelado: se requiere un Dockerfile.", "orange")
-
-
                 return # El usuario no quiso crear el archivo
 
-
-
-
-
-        # Proceder a pedir el tag y buildear
-
-
+        # MODIFICADO: Ejemplo de tag para GHCR
         tag, ok = QInputDialog.getText(self, "Tag de la Imagen",
-
-
-                                       "Ingrese el tag (ej: mi-app:latest):")
-
-
+                                       f"Ingrese el tag (ej: {self.registry_url}/tu-usuario/mi-app:latest):")
         if not ok or not tag:
-
-
             return  # Usuario canceló
 
-
-
-
-
         self.log_to_panel(f"Iniciando build en {path} con tag {tag}...", "cyan")
-
-
         self.nav_list.setCurrentRow(3)  # Cambiar a la pestaña de Logs
-
-
         self.logs_output.clear()
-
-
-
-
 
         worker = Worker(self.docker_service.get_build_stream, path, tag)
-
-
         worker.signals.progress.connect(self.handle_build_progress)
-
-
         worker.signals.finished.connect(self.on_build_finished)
-
-
         worker.signals.error.connect(self.log_error)
-
-
         self.threadpool.start(worker)
 
-
-
-
-
     @Slot(object)
-
-
-    def handle_build_progress(self, log_data):
-
-
-        """Muestra la salida del stream de build en el panel de logs."""
-
-
-        if isinstance(log_data, dict):
-
-
-            if 'stream' in log_data:
-
-
-                self.log_to_panel(log_data['stream'].strip(), color=None, move_cursor=True)
-
-
-            elif 'error' in log_data:
-
-
-                self.log_to_panel(log_data['error'].strip(), color="red", move_cursor=True)
-
-
-            else:
-
-
-                self.log_to_panel(f"Build data (inesperado): {log_data}", color="yellow", move_cursor=True)
-
-
-        else:
-
-
-            self.log_to_panel(f"Build data (raw): {log_data}", color="yellow", move_cursor=True)
-
-
-
-
-
-    @Slot(object)
-
-
     def on_build_finished(self, result=None):
-
-
         self.log_to_panel("--- Build completado ---", "green")
-
-
         self.load_images_async() # Refrescar la lista de imágenes
 
-
-
-
+    @Slot(object)
+    def handle_build_progress(self, log_data_bytes):
+        """Muestra la salida del stream de build en el panel de logs."""
+        try:
+            # log_data_bytes es un trozo de bytes. Puede contener múltiples líneas JSON.
+            lines = log_data_bytes.decode('utf-8').strip().split('\n')
+            for line in lines:
+                if not line:
+                    continue
+                try:
+                    log_data = json.loads(line)  # Parsea cada línea como JSON
+                    if 'stream' in log_data:
+                        self.log_to_panel(log_data['stream'].strip(), color=None, move_cursor=True)
+                    elif 'error' in log_data:
+                        self.log_to_panel(log_data['error'].strip(), color="red", move_cursor=True)
+                    elif 'status' in log_data:
+                        # También maneja mensajes de 'status' para progreso tipo pull
+                        progress = log_data.get('progress', '')
+                        self.log_to_panel(f"{log_data['status']} {progress}".strip(), color='gray', move_cursor=True)
+                    else:
+                        self.log_to_panel(f"Build data (inesperado): {log_data}", color="yellow", move_cursor=True)
+                except json.JSONDecodeError:
+                    # Si una línea no es JSON, la imprime en crudo
+                    self.log_to_panel(f"Build data (raw): {line}", color="yellow", move_cursor=True)
+        except UnicodeDecodeError:
+            pass  # Ignorar bytes corruptos
 
     def handle_pull_image(self):
-
-
         """Pide un nombre de imagen y la descarga (pull)."""
-
-
+        # MODIFICADO: Ejemplo de pull para GHCR
         image_name, ok = QInputDialog.getText(self, "Descargar Imagen (Pull)", 
-
-
-                                              "Nombre de la imagen (ej: alpine:latest):")
-
-
+                                              f"Nombre de la imagen (ej: {self.registry_url}/usuario/imagen:latest):")
         if not ok or not image_name:
-
-
             return
-
-
         
-
-
         self.log_to_panel(f"Iniciando pull de {image_name}...", "cyan")
-
-
         self.nav_list.setCurrentRow(3) # Pestaña de Logs
-
-
         self.logs_output.clear()
-
-
-
-
 
         worker = Worker(self.docker_service.get_pull_stream, image_name)
-
-
         worker.signals.progress.connect(self.handle_pull_progress)
-
-
         worker.signals.finished.connect(self.on_pull_finished)
-
-
         worker.signals.error.connect(self.log_error)
-
-
         self.threadpool.start(worker)
 
-
-
-
-
     @Slot(object)
-
-
     def handle_pull_progress(self, log_data):
-
-
         """Muestra el progreso del pull."""
-
-
         status = log_data.get('status', '')
-
-
         progress = log_data.get('progress', '')
-
-
         self.log_to_panel(f"{status} {progress}", color=None, move_cursor=True)
 
-
-
-
-
     @Slot(object)
-
-
     def on_pull_finished(self, result=None):
-
-
         self.log_to_panel("--- Pull completado ---", "green")
-
-
         self.load_images_async()
 
-
-
-
-
-    def handle_run_container(self):
-
-
-        """Pide una imagen y la ejecuta (run)."""
-
-
-        image_name, ok = QInputDialog.getText(self, "Ejecutar Imagen (Run)", 
-
-
-                                              "Nombre de la imagen a ejecutar:")
-
-
-        if not ok or not image_name:
-
-
+    def handle_push_image(self):
+        """Maneja la lógica para subir (push) una imagen al registro."""
+        if not self.docker_service.registry_logged_in:
+            self.log_to_panel(f"Debe estar autenticado en {self.registry_url} para poder subir imágenes.", "orange")
+            self.show_login_dialog_force()
             return
 
+        image_id, tags_str = self._get_selected_image_details()
+        if not tags_str:
+            return # Mensaje ya mostrado por el helper
 
+        self.log_to_panel(f"--- Iniciando proceso de Push ---", "blue")
+        self.log_to_panel(f"Imagen seleccionada: ID={image_id}, Tags='{tags_str}'", "blue")
 
-
-
-        self.log_to_panel(f"Intentando ejecutar {image_name}...", "cyan")
-
-
-        worker = Worker(self.docker_service.run_container, image_name)
-
-
-        worker.signals.finished.connect(self.on_simple_action_finished) # Reusa el handler simple
-
-
-        worker.signals.error.connect(self.log_error)
-
-
-        self.threadpool.start(worker)
-
-
-
-
-
-    def handle_stop_container(self):
-
-
-        container_id = self._get_selected_container_id()
-
-
-        if not container_id: return
-
-
+        tags = [tag.strip() for tag in tags_str.split(',')]
         
-
-
-        self.log_to_panel(f"Intentando detener {container_id}...", "orange")
-
-
-        worker = Worker(self.docker_service.stop_container, container_id)
-
-
-        worker.signals.finished.connect(self.on_simple_action_finished)
-
-
-        worker.signals.error.connect(self.log_error)
-
-
-        self.threadpool.start(worker)
-
-
-        
-
-
-    def handle_remove_container(self):
-
-
-        container_id = self._get_selected_container_id()
-
-
-        if not container_id: return
-
-
-        
-
-
-        self.log_to_panel(f"Intentando eliminar {container_id}...", "orange")
-
-
-        worker = Worker(self.docker_service.remove_container, container_id)
-
-
-        worker.signals.finished.connect(self.on_simple_action_finished)
-
-
-        worker.signals.error.connect(self.log_error)
-
-
-        self.threadpool.start(worker)
-
-
-
-
-
-    @Slot(object)
-
-
-    def on_simple_action_finished(self, result):
-
-
-        """Manejador genérico para acciones simples (Stop, Remove, Run)."""
-
-
-        success, message = result
-
-
-        if success:
-
-
-            self.log_to_panel(message, "green")
-
-
-            self.load_containers_async() # Refrescar lista de contenedores
-
-
+        # 1. Determinar el tag a pushear
+        tag_to_push = None
+        if len(tags) == 1:
+            tag_to_push = tags[0]
         else:
+            # Si hay múltiples tags, preguntar al usuario
+            tag_to_push, ok = QInputDialog.getItem(self, "Seleccionar Tag", 
+                                                   "Esta imagen tiene múltiples tags. ¿Cuál desea subir?", tags, 0, False)
+            if not ok or not tag_to_push:
+                self.log_to_panel("Push cancelado.", "yellow")
+                return
 
+        # 2. Verificar si el tag es compatible con el registro
+        if not tag_to_push.startswith(self.registry_url):
+            self.log_to_panel(f"El tag '{tag_to_push}' no parece ser para el registro '{self.registry_url}'.", "yellow")
+            
+            # Sugerir un nuevo tag usando el repo detectado si existe
+            repo_placeholder = self.detected_repo_name or "my-app"
+            suggested_tag = f"{self.registry_url}/{self.docker_service.registry_username.lower()}/{repo_placeholder}:latest"
+            new_tag, ok = QInputDialog.getText(self, "Retagear Imagen",
+                                               f"Por favor, ingrese un nuevo tag completo para el registro:",
+                                               QLineEdit.EchoMode.Normal,
+                                               suggested_tag)
+            
+            if not ok or not new_tag:
+                self.log_to_panel("Push cancelado.", "yellow")
+                return
 
-            self.log_to_panel(message, "red")
+            # FIX: Docker repository names must be lowercase.
+            try:
+                # Separate registry from the rest of the tag, if present
+                registry = ""
+                repo_and_tag = new_tag
+                
+                parts = new_tag.split('/', 1)
+                if len(parts) > 1 and ('.' in parts[0] or ':' in parts[0]):
+                    registry = parts[0]
+                    repo_and_tag = parts[1]
 
+                # Lowercase the repository and tag part
+                repo_and_tag_lower = repo_and_tag.lower()
+                
+                # Reassemble the full tag
+                final_tag = f"{registry}/{repo_and_tag_lower}" if registry else repo_and_tag_lower
 
+                if final_tag != new_tag:
+                    self.log_to_panel(f"Aviso: El nombre del repositorio ha sido convertido a minúsculas: {final_tag}", "yellow")
+                
+                new_tag = final_tag
+            except Exception as e:
+                self.log_to_panel(f"Error inesperado al procesar el tag '{new_tag}': {e}", "red")
+                return
+            
+            # Ejecutar el retag en un worker
+            self.log_to_panel(f"Retageando '{tag_to_push}' a '{new_tag}'...", "cyan")
+            worker = Worker(self.docker_service.tag_image, tag_to_push, new_tag)
+            # Cuando termine, llamará a _start_push_worker con el nuevo tag
+            worker.signals.finished.connect(lambda result: self._on_retag_finished(result, new_tag))
+            worker.signals.error.connect(self.log_error)
+            self.threadpool.start(worker)
+        else:
+            # El tag es correcto, iniciar el push directamente
+            self._start_push_worker(tag_to_push)
 
+    @Slot(object, str)
+    def _on_retag_finished(self, result, new_tag):
+        """Se llama cuando la operación de retag ha finalizado."""
+        success, message = result
+        self.log_to_panel(message, "green" if success else "red")
+        
+        if success:
+            # Iniciar el push PRIMERO para evitar posibles conflictos de UI/hilos
+            self._start_push_worker(new_tag) 
+            # Luego, refrescar la lista de imágenes en segundo plano
+            self.load_images_async() 
+        else:
+            self.log_to_panel("No se pudo retagear la imagen. Push cancelado.", "red")
 
-
-    def handle_view_logs(self):
-
-
-        container_id = self._get_selected_container_id()
-
-
-        if not container_id: return
-
-
-
-
-
-        self.log_to_panel(f"Obteniendo logs para {container_id}...", "cyan")
-
-
+    def _start_push_worker(self, tag_to_push):
+        """Inicia el worker para la operación de push."""
+        print(f"DEBUG: Starting push worker for tag: {tag_to_push}", flush=True)
+        self.current_op_has_error = False # Resetear el flag de error
+        self.log_to_panel(f"Iniciando push de {tag_to_push}...", "cyan")
         self.nav_list.setCurrentRow(3) # Pestaña de Logs
-
-
         self.logs_output.clear()
 
-
-
-
-
-        worker = Worker(self.docker_service.get_logs_stream, container_id)
-
-
-        worker.signals.progress.connect(self.handle_log_stream)
-
-
-        worker.signals.finished.connect(lambda: self.log_to_panel("--- Fin del stream de logs ---", "gray"))
-
-
+        worker = Worker(self.docker_service.get_push_stream, tag_to_push)
+        worker.signals.progress.connect(self.handle_push_progress)
+        worker.signals.finished.connect(self.on_push_finished)
         worker.signals.error.connect(self.log_error)
-
-
         self.threadpool.start(worker)
 
+    @Slot(object)
+    def handle_push_progress(self, log_data):
+        """Muestra el progreso del push y detecta errores."""
+        print(f"DEBUG (push stream): {log_data}", flush=True) # Para depuración en consola
 
+        if 'errorDetail' in log_data or 'error' in log_data:
+            self.current_op_has_error = True
+            error_message = log_data.get('error', '')
+            if not error_message:
+                error_message = log_data.get('errorDetail', {}).get('message', 'Error desconocido durante el push.')
+            
+            self.log_to_panel(f"ERROR: {error_message}", "red", move_cursor=True)
+            return
 
-
+        status = log_data.get('status', '')
+        progress = log_data.get('progress', '')
+        
+        # Filtrar para no mostrar todos los mensajes de "Layer already exists"
+        if status not in ["Layer already exists", "Waiting"]:
+            self.log_to_panel(f"{status} {progress}".strip(), color=None, move_cursor=True)
 
     @Slot(object)
+    def on_push_finished(self, result=None):
+        if self.current_op_has_error:
+            self.log_to_panel("--- Push fallido ---", "red")
+            self.log_to_panel("Causa más común: El Token de Acceso Personal (PAT) no tiene el permiso 'write:packages'.", "yellow")
+        else:
+            self.log_to_panel("--- Push completado ---", "green")
+            self.log_to_panel("Si la imagen no aparece en tu repositorio de GitHub, ve a la sección 'Packages' de tu perfil/organización y puede que necesites vincular el paquete a un repositorio manualmente.", "yellow")
+        # No es necesario refrescar imágenes aquí, ya que no cambian
 
+    def handle_link_repo_folder(self):
+        """
+        Abre un diálogo para que el usuario seleccione una carpeta de repositorio
+        y detecta el nombre del mismo.
+        """
+        path = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Repositorio Local")
+        if not path:
+            return # Usuario canceló
 
-    def handle_log_stream(self, log_data_bytes):
+        repo_name = self._get_repo_name_from_path(path)
+        if repo_name:
+            self.detected_repo_name = repo_name.lower()
+            self.log_to_panel(f"Repositorio enlazado: {self.detected_repo_name}", "green")
+            if hasattr(self, 'linked_repo_label'):
+                self.linked_repo_label.setText(self.detected_repo_name)
+        else:
+            self.detected_repo_name = None
+            self.log_to_panel("No se pudo detectar un repositorio de GitHub en la carpeta seleccionada.", "orange")
+            if hasattr(self, 'linked_repo_label'):
+                self.linked_repo_label.setText("Ninguno")
 
+    def handle_run_container(self):
+        """Pide una imagen y la ejecuta (run)."""
+        image_name, ok = QInputDialog.getText(self, "Ejecutar Imagen (Run)", 
+                                              "Nombre de la imagen a ejecutar:")
+        if not ok or not image_name:
+            return
 
-        """Muestra la salida de logs de un contenedor."""
+        self.log_to_panel(f"Intentando ejecutar {image_name}...", "cyan")
+        worker = Worker(self.docker_service.run_container, image_name)
+        worker.signals.finished.connect(self.on_simple_action_finished) # Reusa el handler simple
+        worker.signals.error.connect(self.log_error)
+        self.threadpool.start(worker)
 
-
-        try:
-
-
-            self.log_to_panel(log_data_bytes.decode('utf-8').strip(), color=None, move_cursor=True)
-
-
-        except UnicodeDecodeError:
-
-
-            pass # Ignorar bytes corruptos
-
-
-
-
-
-    def handle_view_metrics(self):
-
-
+    def handle_stop_container(self):
         container_id = self._get_selected_container_id()
+        if not container_id: return
+        
+        self.log_to_panel(f"Intentando detener {container_id}...", "orange")
+        worker = Worker(self.docker_service.stop_container, container_id)
+        worker.signals.finished.connect(self.on_simple_action_finished)
+        worker.signals.error.connect(self.log_error)
+        self.threadpool.start(worker)
+        
+    def handle_remove_container(self):
+        container_id = self._get_selected_container_id()
+        if not container_id: return
+        
+        self.log_to_panel(f"Intentando eliminar {container_id}...", "orange")
+        worker = Worker(self.docker_service.remove_container, container_id)
+        worker.signals.finished.connect(self.on_simple_action_finished)
+        worker.signals.error.connect(self.log_error)
+        self.threadpool.start(worker)
 
+    @Slot(object)
+    def on_simple_action_finished(self, result):
+        """Manejador genérico para acciones simples (Stop, Remove, Run)."""
+        success, message = result
+        if success:
+            self.log_to_panel(message, "green")
+            self.load_containers_async() # Refrescar lista de contenedores
+        else:
+            self.log_to_panel(message, "red")
 
+    def handle_view_logs(self):
+        container_id = self._get_selected_container_id()
         if not container_id: return
 
+        self.log_to_panel(f"Obteniendo logs para {container_id}...", "cyan")
+        self.nav_list.setCurrentRow(3) # Pestaña de Logs
+        self.logs_output.clear()
 
+        worker = Worker(self.docker_service.get_logs_stream, container_id)
+        worker.signals.progress.connect(self.handle_log_stream)
+        worker.signals.finished.connect(lambda: self.log_to_panel("--- Fin del stream de logs ---", "gray"))
+        worker.signals.error.connect(self.log_error)
+        self.threadpool.start(worker)
+
+    @Slot(object)
+    def handle_log_stream(self, log_data_bytes):
+        """Muestra la salida de logs de un contenedor."""
+        try:
+            self.log_to_panel(log_data_bytes.decode('utf-8').strip(), color=None, move_cursor=True)
+        except UnicodeDecodeError:
+            pass # Ignorar bytes corruptos
+
+    def handle_view_metrics(self):
+        container_id = self._get_selected_container_id()
+        if not container_id: return
         
-
-
         self.log_to_panel(f"Función 'Ver Métricas' para {container_id} no implementada.", "yellow")
-
-
         # TODO: Iniciar un stream de stats (get_stats_stream) y mostrarlo en una
-
-
         # ventana/panel separado, actualizándose en tiempo real.
-
-
         # Esto es más complejo ya que el stream no "termina" mientras
-
-
         # el contenedor esté vivo.
 
-
-
-
-
     # --- Utilidades ---
-
-
     
-
-
     def show_login_dialog_force(self):
-
-
         """Muestra el diálogo de login, incluso si ya hay credenciales."""
-
-
-        dialog = LoginDialog(self.docker_service, self.config_manager, self)
-
-
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-
-
-            self.log_to_panel("Credenciales actualizadas exitosamente.")
-
-
-            # Actualizar el título de la ventana principal si es posible
-
-
-            if hasattr(self.window(), 'setWindowTitle'):
-
-
-                 self.window().setWindowTitle(f"DockerVizion (Usuario: {self.docker_service.docker_hub_username})")
-
-
-            # Recargar página de settings
-
-
-            self.main_stack.removeWidget(self.main_stack.widget(4))
-
-
-            self.main_stack.insertWidget(4, self.create_settings_page())
-
-
+        # MODIFICADO: Pasar la URL del registro al diálogo
+        dialog = LoginDialog(self.docker_service, self.config_manager, self.registry_url, self)
         
-
-
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.log_to_panel("Credenciales actualizadas exitosamente.")
+            
+            # MODIFICADO: Actualizar el título de la ventana principal
+            if hasattr(self.window(), 'setWindowTitle'):
+                 self.window().setWindowTitle(f"DockerVizion (Usuario: {self.docker_service.registry_username} @ {self.registry_url})")
+                 
+            # Recargar página de settings
+            self.main_stack.removeWidget(self.main_stack.widget(4))
+            self.main_stack.insertWidget(4, self.create_settings_page())
+        
     @Slot(str)
-
-
     def log_error(self, message):
-
-
         """Muestra un error en el panel de logs."""
-
-
         print(f"Error en worker: {message}")
-
-
         self.log_to_panel(f"[ERROR] {message}", color="red")
 
-
-
-
-
     def log_to_panel(self, message, color=None, move_cursor=False):
-
-
         """Añade un mensaje al panel de logs."""
-
-
         if hasattr(self, 'logs_output'):
-
-
             if color:
-
-
                 self.logs_output.append(f"<span style='color:{color};'>{message}</span>")
-
-
             else:
-
-
                 self.logs_output.append(message)
-
-
             
-
-
             if move_cursor:
-
-
                 self.logs_output.moveCursor(QTextCursor.MoveOperation.End)
-
-
-
-
 
         print(message)
 
 
-
-
-
-
-
-
 # --- Ventana Principal para modo Standalone ---
-
-
 class MainWindow(QMainWindow):
-
-
-    def __init__(self, docker_service, config_manager):
-
-
+    # MODIFICADO: Aceptar la URL del registro
+    def __init__(self, docker_service, config_manager, registry_url):
         super().__init__()
-
-
-        self.setWindowTitle(f"DockerVizion Dashboard (Usuario: {docker_service.docker_hub_username})")
-
-
+        # MODIFICADO: Título de ventana dinámico
+        self.setWindowTitle(f"DockerVizion Dashboard (Usuario: {docker_service.registry_username} @ {registry_url})")
         self.setGeometry(100, 100, 1280, 720)
-
-
         
-
-
-        docker_widget = DockerManagerWidget(docker_service, config_manager, self)
-
-
+        # MODIFICADO: Pasar la URL del registro al widget principal
+        docker_widget = DockerManagerWidget(docker_service, config_manager, registry_url, self)
         self.setCentralWidget(docker_widget)
 
 
-
-
-
-
-
-
 # =============================================================================
-
-
 # 4. PUNTO DE ENTRADA DE LA APLICACIÓN
-
-
 # =============================================================================
-
-
-
-
 
 def main():
-
-
     app = QApplication(sys.argv)
-
-
     app.setStyleSheet(DARK_STYLESHEET)
-
-
     
-
-
+    # NUEVO: Definir el registro aquí
+    REGISTRY_URL = "ghcr.io"
+    
     # 1. Inicializar servicios
-
-
     config_manager = ConfigManager()
-
-
     docker_service = DockerService()
 
-
-
-
-
     # 2. Verificar conexión con Docker Engine
-
-
     connected, error_msg = docker_service.check_connection()
-
-
     if not connected:
-
-
         QMessageBox.critical(None, "Error de Conexión Docker", error_msg)
-
-
         sys.exit(1)
 
-
-
-
-
     # 3. Intentar cargar credenciales y autenticarse
-
-
     creds = config_manager.load_credentials()
-
-
     
-
-
     if creds:
-
-
         print("Credenciales encontradas, intentando login automático...")
-
-
-        success, msg = docker_service.login_to_docker_hub(creds['username'], creds['token'])
-
-
+        # MODIFICADO: Usar el método generalizado con la URL del registro
+        success, msg = docker_service.login_to_registry(REGISTRY_URL, creds['username'], creds['token'])
         if not success:
-
-
             print(f"Login automático fallido: {msg}")
-
-
             creds = None 
-
-
     
-
-
     # 4. Si no hay credenciales (o fallaron), mostrar diálogo de login
-
-
     if not creds:
-
-
         print("No se encontraron credenciales válidas. Mostrando diálogo de login.")
-
-
-        login_dialog = LoginDialog(docker_service, config_manager)
-
-
+        # MODIFICADO: Pasar la URL del registro al diálogo
+        login_dialog = LoginDialog(docker_service, config_manager, REGISTRY_URL)
         if login_dialog.exec() != QDialog.DialogCode.Accepted:
-
-
             print("Login cancelado por el usuario. Saliendo.")
-
-
             sys.exit(0)
 
-
-
-
-
-    # 5. Si llegamos aquí, estamos conectados y (opcionalmente) autenticados
-
-
-    main_window = MainWindow(docker_service, config_manager)
-
-
+    # 5. Si llegamos aquí, estamos conectados y autenticados
+    # MODIFICADO: Pasar la URL del registro a la ventana principal
+    main_window = MainWindow(docker_service, config_manager, REGISTRY_URL)
     main_window.show()
-
-
     
-
-
     sys.exit(app.exec())
 
-
-
-
-
 if __name__ == "__main__":
-
-
     main()
-

@@ -1,0 +1,3 @@
+cd C:/Users/Ariel/Documents/api_login_v11 && .\venv\Scripts\activate && uvicorn api_login_v11:app --reload --port 8001
+
+cd C:/Users/Ariel/Documents/api_login_v11 && gemini

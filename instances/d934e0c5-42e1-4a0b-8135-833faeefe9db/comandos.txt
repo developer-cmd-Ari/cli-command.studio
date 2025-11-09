@@ -1,0 +1,1 @@
+cd C:/Users/Ariel/Documents/ERP_AGENTE _APP && .\venv\Scripts\activate && uvicorn api_login_v10:app --reload --port 8001

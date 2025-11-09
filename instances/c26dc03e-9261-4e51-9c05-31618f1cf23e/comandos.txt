@@ -1,0 +1,1 @@
+cd C:/Users/Ariel/Documents/api_login_v11 && gemini

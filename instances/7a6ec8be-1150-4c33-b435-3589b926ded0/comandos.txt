@@ -1,0 +1,3 @@
+#cd C:/Users/Ariel/Documents/script_iniciador && python docker_manager.py
+cd C:/Users/Ariel/Documents/script_iniciador && gemini
+

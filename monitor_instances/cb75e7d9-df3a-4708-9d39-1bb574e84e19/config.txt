@@ -1,0 +1,5 @@
+# Archivo de configuración del Monitor de Cambios
+# Formato: archivo.py | C:\ruta\origen | C:\ruta\destino | C:\ruta\backup
+
+docker_manager.py | C:/Users/Ariel/Documents/api_test/api_login | C:/Users/Ariel/Documents/script_iniciador | C:/Users/Ariel/Documents/apis_backups
+docker_manager.py | C:/Users/Ariel/Documents/api_test/api_login | C:/Users/Ariel/Documents/script_iniciador | C:/Users/Ariel/Documents/apis_backups

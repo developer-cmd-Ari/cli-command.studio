@@ -1,0 +1,1 @@
+docker logs c8f4a5965722

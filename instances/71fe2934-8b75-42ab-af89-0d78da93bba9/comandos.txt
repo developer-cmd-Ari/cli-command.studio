@@ -1,0 +1,4 @@
+cd C:/Users/Ariel/Documents/app_web/my-app && npm start
+cd C:/Users/Ariel/Documents/app_web/my-app && gemini
+
+

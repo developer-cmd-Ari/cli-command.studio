@@ -37,8 +37,8 @@ def cargar_configuracion():
         print("Creando archivo de ejemplo...")
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                f.write("# Formato: archivo.py | C:\\ruta\\origen | C:\\ruta\\destino | C:\\ruta\\backup\n")
-                f.write("ejemplo.txt | . | .\\destino | .\\backup\\n")
+                f.write("# Formato: archivo.py | C:\\\\ruta\\\\origen | C:\\\\ruta\\\\destino | C:\\\\ruta\\\\backup\\n")
+                f.write("ejemplo.txt | . | .\\\\destino | .\\\\backup\\n")
             print("Archivo de ejemplo creado. Edítalo y reinicia el monitor.")
         except Exception as e:
             print(f"No se pudo crear el config.txt: {e}")

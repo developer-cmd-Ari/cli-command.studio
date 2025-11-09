@@ -441,18 +441,18 @@ class DockerManagerLauncher(QWidget):
         # 3. Autenticar
         creds = config_manager.load_credentials()
         if creds:
-            success, msg = docker_service.login_to_docker_hub(creds['username'], creds['token'])
+            success, msg = docker_service.login_to_registry("ghcr.io", creds['username'], creds['token'])
             if not success:
                 creds = None
         
         if not creds:
-            login_dialog = LoginDialog(docker_service, config_manager, self)
+            login_dialog = LoginDialog(docker_service, config_manager, "ghcr.io", self)
             if login_dialog.exec() != login_dialog.DialogCode.Accepted:
                 self.layout().addWidget(StatusWidget("Login cancelado.\nNo se puede iniciar Docker Manager.", "#ffcccc"))
                 return
         
         # 4. Lanzar el widget principal
-        docker_widget = DockerManagerWidget(docker_service, config_manager, self)
+        docker_widget = DockerManagerWidget(docker_service, config_manager, "ghcr.io", self)
         self.layout().addWidget(docker_widget)
 
 # --- Ventana Principal del HUB ---
