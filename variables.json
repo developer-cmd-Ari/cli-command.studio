@@ -110,9 +110,9 @@
     "ISSUE_STATE": {
         "descripcion": "Estado de las Incidencias (Issues) a listar.",
         "valores": [
-            "all",
+            "open",
             "closed",
-            "open"
+            "all"
         ],
         "default": "open"
     },
@@ -139,5 +139,60 @@
             "11"
         ],
         "default": "10"
+    },
+    "COMMIT_MESSAGE": {
+        "descripcion": "Mensaje descriptivo para el commit de Git.",
+        "valores": [
+            "feat: Añadir característica X",
+            "fix: Corregir error de login",
+            "docs: Actualizar README"
+        ],
+        "default": "feat: Añadir característica X"
+    },
+    "BRANCH_NAME": {
+        "descripcion": "Nombre de la rama Git a crear, cambiar o fusionar.",
+        "valores": [
+            "main",
+            "develop",
+            "feature/nueva-funcionalidad",
+            "fix/bug-critico"
+        ],
+        "default": "develop"
+    },
+    "REMOTE_NAME": {
+        "descripcion": "Nombre del repositorio remoto (ej: 'origin').",
+        "valores": [
+            "origin",
+            "upstream",
+            "mi-servidor"
+        ],
+        "default": "origin"
+    },
+    "FILE_PATH": {
+        "descripcion": "Ruta de un archivo o directorio. Usar '.' para todos.",
+        "valores": [
+            ".",
+            "README.md",
+            "src/app.py",
+            "src/config.json"
+        ],
+        "default": "."
+    },
+    "REMOTE_URL": {
+        "descripcion": "URL del repositorio remoto (HTTPS o SSH).",
+        "valores": [
+            "git@github.com:usuario/repo.git",
+            "https://github.com/usuario/repo.git"
+        ],
+        "default": "git@github.com:usuario/repo.git"
+    },
+    "COMMIT_HASH": {
+        "descripcion": "Hash corto, completo o referencia (~HEAD) del commit.",
+        "valores": [
+            "HEAD^",
+            "a1b2c3d",
+            "HEAD~3"
+        ],
+        "default": "HEAD^"
     }
 }

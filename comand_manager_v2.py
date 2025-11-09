@@ -187,6 +187,7 @@ QSplitter::handle:hover {
 
 COMMANDS_FILE = "commands.json"
 VARIABLES_FILE = "variables.json"
+MONITOR_CONFIG_FILE = "monitor_config.json"
 
 
 # --- Helper para el editor de valores (Fase 4) ---
@@ -201,12 +202,19 @@ class CommandManagerGUI(QMainWindow):
         self.setWindowTitle("Command Manager GUI")
         self.setGeometry(100, 100, 1400, 800)
 
+        # Proceso para comandos de ejecución
         self.process = QProcess(self)
         self.process.readyReadStandardOutput.connect(self.read_stdout)
         self.process.readyReadStandardError.connect(self.read_stderr)
 
+        # Proceso para el monitor en vivo
+        self.monitor_process = QProcess(self)
+        self.monitor_process.readyReadStandardOutput.connect(self.read_monitor_stdout)
+        self.monitor_process.readyReadStandardError.connect(self.read_monitor_stderr)
+
         self.variables_db = self.load_data(VARIABLES_FILE, self.get_default_variables)
         self.commands_db = self.load_data(COMMANDS_FILE, self.get_default_commands)
+        self.monitor_config = self.load_data(MONITOR_CONFIG_FILE, lambda: {"monitor_command": "docker ps"})
 
         self.current_template = ""
         self.dynamic_variable_widgets = {}
@@ -218,11 +226,11 @@ class CommandManagerGUI(QMainWindow):
         # --- NUEVO: Estado de edición de variables ---
         self.currently_editing_variable = None
         self.value_editor_signals = ValueEditorSignals()
+        self.current_command_filter_vars = None # Para el filtro de variables por comando
         # -------------------------------------------
 
         self.setup_ui()
         self.init_signals()
-        self.refresh_right_dock()
         
         # Seleccionar la primera categoría y comando si existen
         if self.category_list.count() > 0:
@@ -231,6 +239,8 @@ class CommandManagerGUI(QMainWindow):
             if list_widget and list_widget.count() > 0:
                 list_widget.setCurrentRow(0)
                 self.on_command_selected(list_widget.item(0))
+        
+        self.run_monitor_command() # Iniciar monitor al arrancar
 
 
     # --- Lógica de Carga y Guardado de Datos ---
@@ -321,13 +331,11 @@ class CommandManagerGUI(QMainWindow):
         self.left_dock = QDockWidget("Categorías", self)
         self.left_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea)
         
-        # Widget contenedor del dock izquierdo
         left_dock_container = QWidget()
         ld_layout = QVBoxLayout(left_dock_container)
         ld_layout.setContentsMargins(0, 0, 0, 0)
         ld_layout.setSpacing(2)
 
-        # Barra de herramientas para categorías
         cat_toolbar = QToolBar()
         cat_toolbar.setObjectName("DockToolBar")
         
@@ -344,7 +352,6 @@ class CommandManagerGUI(QMainWindow):
         cat_toolbar.addWidget(self.del_cat_button)
         ld_layout.addWidget(cat_toolbar)
 
-        # Lista de categorías
         self.category_list = QListWidget()
         self.category_list.addItems(self.commands_db.keys())
         ld_layout.addWidget(self.category_list)
@@ -352,31 +359,40 @@ class CommandManagerGUI(QMainWindow):
         self.left_dock.setWidget(left_dock_container)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
 
-        # --- Dock Derecho (Info en Vivo y Banco de Variables) ---
+        # --- Dock Derecho (Monitor y Variables) ---
         self.right_dock = QDockWidget("Vistas en Vivo", self)
         self.right_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea)
         right_dock_widget = QWidget()
         right_layout = QVBoxLayout(right_dock_widget)
-        self.refresh_button = QPushButton("Actualizar Vistas")
-        right_layout.addWidget(self.refresh_button)
-
+        
         self.info_tabs = QTabWidget()
-        self.info_tabs.setTabsClosable(True) # Permitir cerrar pestañas dinámicas
+        self.info_tabs.setTabsClosable(True)
         
-        self.containers_view = QTextEdit()
-        self.containers_view.setReadOnly(True)
-        self.images_view = QTextEdit()
-        self.images_view.setReadOnly(True)
+        # --- Pestaña de Monitor (NUEVA) ---
+        self.monitor_tab_widget = QWidget()
+        monitor_layout = QVBoxLayout(self.monitor_tab_widget)
         
-        # --- NUEVO: Pestaña de Variables (Fase 4 - Refactorizado) ---
+        monitor_input_layout = QHBoxLayout()
+        self.monitor_command_input = QLineEdit(self.monitor_config["monitor_command"])
+        self.monitor_command_input.setPlaceholderText("Comando a monitorear...")
+        self.save_monitor_cmd_button = QPushButton("Aplicar")
+        monitor_input_layout.addWidget(self.monitor_command_input)
+        monitor_input_layout.addWidget(self.save_monitor_cmd_button)
+        
+        self.monitor_output = QTextEdit()
+        self.monitor_output.setReadOnly(True)
+        self.monitor_output.setFont(QFont("Consolas", 9))
+        
+        monitor_layout.addLayout(monitor_input_layout)
+        monitor_layout.addWidget(self.monitor_output)
+        
+        # --- Pestaña de Variables (Existente) ---
         self.variables_tab_widget = QWidget()
         variables_layout = QVBoxLayout(self.variables_tab_widget)
         variables_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Usaremos un splitter para dividir la lista de la edición
         self.variable_splitter = QSplitter(Qt.Orientation.Vertical)
 
-        # Widget superior: la lista de variables y su toolbar
         top_widget = QWidget()
         top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -388,6 +404,11 @@ class CommandManagerGUI(QMainWindow):
         self.add_var_button = QToolButton()
         self.add_var_button.setText("Añadir (+)")
         self.add_var_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+
+        self.show_all_vars_button = QToolButton()
+        self.show_all_vars_button.setText("Mostrar Todas")
+        self.show_all_vars_button.setVisible(False) # Oculto por defecto
+        self.show_all_vars_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         
         self.del_var_button = QToolButton()
         self.del_var_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon))
@@ -396,42 +417,44 @@ class CommandManagerGUI(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         var_toolbar.addWidget(self.add_var_button)
+        var_toolbar.addWidget(self.show_all_vars_button)
         var_toolbar.addWidget(spacer)
         var_toolbar.addWidget(self.del_var_button)
         top_layout.addWidget(var_toolbar)
+
+        self.variable_search_bar = QLineEdit()
+        self.variable_search_bar.setPlaceholderText("Buscar variable...")
+        top_layout.addWidget(self.variable_search_bar)
 
         self.variable_bank_list = QListWidget()
         self.variable_bank_list.setToolTip("Selecciona una variable para ver/editar sus opciones.")
         self.variable_bank_list.addItems(sorted(self.variables_db.keys()))
         top_layout.addWidget(self.variable_bank_list)
 
-        # Botón de edición que aparecerá al seleccionar
         self.edit_variable_button = QToolButton()
         self.edit_variable_button.setText("Editar Valores / Descripción")
         self.edit_variable_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
         self.edit_variable_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.edit_variable_button.setVisible(False) # Oculto por defecto
+        self.edit_variable_button.setVisible(False) 
         top_layout.addWidget(self.edit_variable_button)
 
-        # Widget inferior: el contenedor del editor (inicialmente vacío y oculto)
         self.variable_editor_container = QWidget()
-        self.variable_editor_container.setLayout(QVBoxLayout()) # Layout listo para ser poblado
+        self.variable_editor_container.setLayout(QVBoxLayout()) 
         self.variable_editor_container.setVisible(False)
 
         self.variable_splitter.addWidget(top_widget)
         self.variable_splitter.addWidget(self.variable_editor_container)
-        self.variable_splitter.setSizes([300, 500]) # Tamaños iniciales
+        self.variable_splitter.setSizes([300, 500]) 
 
         variables_layout.addWidget(self.variable_splitter)
-        # ---------------------------------------------
         
-        self.info_tabs.addTab(self.containers_view, "Contenedores")
-        self.info_tabs.addTab(self.images_view, "Imágenes")
+        # --- Añadir Pestañas ---
+        self.info_tabs.addTab(self.monitor_tab_widget, "Monitor")
         self.info_tabs.addTab(self.variables_tab_widget, "Variables")
+
         # Asegurarnos de que las pestañas base no se puedan cerrar
         self.info_tabs.tabBar().setTabButton(0, QTabBar.ButtonPosition.RightSide, None)
         self.info_tabs.tabBar().setTabButton(1, QTabBar.ButtonPosition.RightSide, None)
-        self.info_tabs.tabBar().setTabButton(2, QTabBar.ButtonPosition.RightSide, None)
         
         right_layout.addWidget(self.info_tabs)
         self.right_dock.setWidget(right_dock_widget)
@@ -456,6 +479,9 @@ class CommandManagerGUI(QMainWindow):
         self.edit_cmd_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.edit_cmd_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogSaveButton))
         
+        self.command_search_bar = QLineEdit()
+        self.command_search_bar.setPlaceholderText("Buscar comando...")
+        
         self.del_cmd_button = QToolButton()
         self.del_cmd_button.setText("Eliminar (-)")
         self.del_cmd_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -466,15 +492,25 @@ class CommandManagerGUI(QMainWindow):
         
         cmd_toolbar.addWidget(self.add_cmd_button)
         cmd_toolbar.addWidget(self.edit_cmd_button)
+        cmd_toolbar.addWidget(self.command_search_bar)
         cmd_toolbar.addWidget(spacer)
         cmd_toolbar.addWidget(self.del_cmd_button)
         main_layout.addWidget(cmd_toolbar)
         # ----------------------------------------------
 
-        # 1. StackedWidget
+        # --- Contenedor central para cambiar entre vista normal y búsqueda ---
+        self.central_display_stack = QStackedWidget()
+
+        # 1. StackedWidget para la vista normal por categorías
         self.command_stack = QStackedWidget()
         self.rebuild_command_stack() # Rellenar el stack desde la DB
-        main_layout.addWidget(self.command_stack)
+        
+        # 2. Lista para los resultados de búsqueda
+        self.search_results_list = QListWidget()
+
+        self.central_display_stack.addWidget(self.command_stack)
+        self.central_display_stack.addWidget(self.search_results_list)
+        main_layout.addWidget(self.central_display_stack)
 
         # 2. Área de información
         self.info_display = QTextEdit()
@@ -577,8 +613,11 @@ class CommandManagerGUI(QMainWindow):
         self.category_list.currentRowChanged.connect(self.command_stack.setCurrentIndex)
         self.run_button.clicked.connect(self.execute_command)
         self.command_input.returnPressed.connect(self.execute_command)
-        self.refresh_button.clicked.connect(self.refresh_right_dock)
         self.config_button.clicked.connect(self.toggle_variable_panel)
+
+        # --- Señales del Monitor ---
+        self.save_monitor_cmd_button.clicked.connect(self.on_save_monitor_command)
+        self.monitor_command_input.returnPressed.connect(self.on_save_monitor_command)
 
         # Señales de Edición de Comandos (Fase 3)
         self.add_cat_button.clicked.connect(self.on_add_category)
@@ -590,15 +629,120 @@ class CommandManagerGUI(QMainWindow):
         self.editor_cancel_button.clicked.connect(self.on_cancel_edit)
         self.variable_bank_list.itemDoubleClicked.connect(self.on_variable_bank_double_clicked)
 
+        # --- Señales de Búsqueda de Comandos ---
+        self.command_search_bar.textChanged.connect(self.on_command_search_changed)
+        self.search_results_list.itemClicked.connect(self.on_search_result_selected)
+
         # --- NUEVAS SEÑALES (Fase 4 - Refactorizado) ---
         self.variable_bank_list.currentItemChanged.connect(self.on_variable_selected)
         self.edit_variable_button.clicked.connect(self.show_variable_editor)
         self.add_var_button.clicked.connect(self.on_add_variable)
         self.del_var_button.clicked.connect(self.on_delete_variable)
+        self.show_all_vars_button.clicked.connect(self.on_show_all_variables)
+        self.variable_search_bar.textChanged.connect(self.on_variable_search_changed)
         
         # Conecta la señal personalizada para la actualización en vivo
         self.value_editor_signals.valueChanged.connect(self.on_variable_value_changed)
+    
+    # --- Slots de Búsqueda y Filtro de Variables ---
+    def on_variable_search_changed(self):
+        """Se activa cuando el texto de búsqueda de variables cambia."""
+        self.apply_variable_filters()
 
+    def apply_variable_filters(self):
+        """Aplica los filtros de comando y búsqueda a la lista de variables."""
+        search_text = self.variable_search_bar.text().lower()
+        
+        is_command_filtering = self.current_command_filter_vars is not None
+
+        for i in range(self.variable_bank_list.count()):
+            item = self.variable_bank_list.item(i)
+            var_name = item.text()
+
+            if is_command_filtering:
+                command_filter_passed = var_name in self.current_command_filter_vars
+            else:
+                command_filter_passed = True
+
+            search_filter_passed = search_text in var_name.lower()
+
+            item.setHidden(not (command_filter_passed and search_filter_passed))
+
+    def filter_variable_list(self, variables_to_show):
+        """
+        Establece el filtro de variables por comando y aplica todos los filtros.
+        - Si `variables_to_show` es una lista, filtra por esas variables.
+        - Si `variables_to_show` es None, quita el filtro de comando.
+        """
+        self.current_command_filter_vars = variables_to_show
+        self.show_all_vars_button.setVisible(variables_to_show is not None)
+        self.apply_variable_filters()
+
+    def on_show_all_variables(self):
+        """Quita todos los filtros de la lista de variables."""
+        self.variable_search_bar.blockSignals(True)
+        self.variable_search_bar.clear()
+        self.variable_search_bar.blockSignals(False)
+        
+        self.filter_variable_list(None)
+
+    # --- Slots de Búsqueda de Comandos ---
+    def on_command_search_changed(self, text):
+        """Filtra los comandos en todas las categorías basado en el texto de búsqueda."""
+        text = text.strip()
+        if not text:
+            # Si no hay texto, mostrar la vista normal de comandos
+            self.central_display_stack.setCurrentWidget(self.command_stack)
+            return
+
+        # Si hay texto, cambiar a la vista de resultados de búsqueda
+        self.central_display_stack.setCurrentWidget(self.search_results_list)
+        self.search_results_list.clear()
+
+        # Buscar en toda la base de datos de comandos
+        for cat_name, commands in self.commands_db.items():
+            for cmd_name, cmd_data in commands.items():
+                if text.lower() in cmd_name.lower():
+                    # Añadir item al resultado de búsqueda
+                    display_text = f"{cmd_name}  ({cat_name})" # Mostrar comando y categoría
+                    item = QListWidgetItem(display_text)
+                    # Guardar la información necesaria para encontrar el comando original
+                    item.setData(Qt.ItemDataRole.UserRole, {"category": cat_name, "command": cmd_name})
+                    self.search_results_list.addItem(item)
+
+    def on_search_result_selected(self, item):
+        """Se activa al hacer clic en un resultado de búsqueda."""
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if not data:
+            return
+
+        cat_name = data["category"]
+        cmd_name = data["command"]
+
+        # 1. Encontrar y seleccionar la categoría en la lista de categorías
+        cat_items = self.category_list.findItems(cat_name, Qt.MatchFlag.MatchExactly)
+        if not cat_items:
+            return
+        self.category_list.setCurrentItem(cat_items[0])
+        
+        # El setCurrentItem anterior ya cambió el índice del command_stack
+        current_list_widget = self.command_stack.currentWidget()
+
+        # 2. Encontrar y seleccionar el comando en la lista de comandos de esa categoría
+        cmd_items = current_list_widget.findItems(cmd_name, Qt.MatchFlag.MatchExactly)
+        if not cmd_items:
+            return
+        current_list_widget.setCurrentItem(cmd_items[0])
+        
+        # 3. Disparar la selección normal para actualizar el resto de la UI
+        self.on_command_selected(cmd_items[0])
+
+        # 4. Limpiar la búsqueda y volver a la vista normal
+        # Bloquear señales para evitar un bucle/comportamiento no deseado
+        self.command_search_bar.blockSignals(True)
+        self.command_search_bar.clear()
+        self.command_search_bar.blockSignals(False)
+        self.central_display_stack.setCurrentWidget(self.command_stack)
 
     # --- Slots de Edición (Fase 3) ---
 
@@ -609,6 +753,7 @@ class CommandManagerGUI(QMainWindow):
             self.command_input.clear()
             self.variable_config_panel.hide()
             self.config_button.setVisible(False)
+            self.filter_variable_list(None) # Limpiar filtro
             return
 
         cmd_name = item.text()
@@ -624,6 +769,11 @@ class CommandManagerGUI(QMainWindow):
         
         self.info_display.setHtml(f"<h3>{cmd_name}</h3><p>{cmd_data['info']}</p>")
         self.current_template = cmd_data["template"]
+
+        # Filtrar la lista de variables según el comando seleccionado
+        variables_in_template = re.findall(r'\[([^\]]+)\]', self.current_template)
+        unique_variables = sorted(list(set(variables_in_template)))
+        self.filter_variable_list(unique_variables)
         
         self.build_variable_widgets() 
         self.update_command_preview() 
@@ -723,6 +873,8 @@ class CommandManagerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Selecciona una categoría primero.")
             return
 
+        self.filter_variable_list(None) # Quitar filtros de variables al añadir comando
+
         self.is_editing_command = False
         self.current_edit_category = current_cat_item.text()
 
@@ -750,6 +902,8 @@ class CommandManagerGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Selecciona un comando para editar.")
             return
             
+        self.filter_variable_list(None) # Quitar filtros de variables al editar comando
+
         self.is_editing_command = True
         self.current_edit_category = current_cat_item.text()
         self.current_edit_command_name = current_cmd_item.text()
@@ -1019,34 +1173,41 @@ class CommandManagerGUI(QMainWindow):
         data = self.process.readAllStandardError().data().decode()
         self.console_output.append(f"<span style='color: #ff4444;'>{data.strip()}</span>")
 
-    def refresh_right_dock(self):
-        """Actualiza los paneles de contenedores e imágenes."""
-        self.containers_view.setText("Actualizando contenedores...")
-        self.images_view.setText("Actualizando imágenes...")
+    def read_monitor_stdout(self):
+        """Lee la salida estándar del proceso del monitor."""
+        data = self.monitor_process.readAllStandardOutput().data().decode()
+        self.monitor_output.append(data.strip())
 
-        # --- Ejecutar 'docker ps' ---
-        process_ps = QProcess()
-        process_ps.start("docker", ["ps", "--no-trunc"]) 
-        process_ps.waitForFinished()
-        output_ps = process_ps.readAllStandardOutput().data().decode()
-        error_ps = process_ps.readAllStandardError().data().decode()
+    def read_monitor_stderr(self):
+        """Lee la salida de error del proceso del monitor y la pone en rojo."""
+        data = self.monitor_process.readAllStandardError().data().decode()
+        self.monitor_output.append(f"<span style='color: #ff4444;'>{data.strip()}</span>")
+
+    def run_monitor_command(self):
+        """Ejecuta o reinicia el comando de monitoreo."""
+        if self.monitor_process.state() == QProcess.ProcessState.Running:
+            self.monitor_process.kill()
+            self.monitor_process.waitForFinished()
+
+        self.monitor_output.clear()
+        command_str = self.monitor_command_input.text().strip()
+        if not command_str:
+            self.monitor_output.setText("No se ha especificado un comando de monitoreo.")
+            return
+
+        self.monitor_output.append(f"<i style='color: #00aaff;'>Ejecutando: {command_str}</i>\n")
         
-        if error_ps:
-            self.containers_view.setText(f"<span style='color: #ff4444;'>Error:\n{error_ps}</span>")
-        else:
-            self.containers_view.setText(output_ps)
+        parts = command_str.split()
+        program = parts[0]
+        arguments = parts[1:]
+        self.monitor_process.start(program, arguments)
 
-        # --- Ejecutar 'docker images' ---
-        process_img = QProcess()
-        process_img.start("docker", ["images", "--no-trunc"])
-        process_img.waitForFinished()
-        output_img = process_img.readAllStandardOutput().data().decode()
-        error_img = process_img.readAllStandardError().data().decode()
-
-        if error_img:
-            self.images_view.setText(f"<span style='color: #ff4444;'>Error:\n{error_img}</span>")
-        else:
-            self.images_view.setText(output_img)
+    def on_save_monitor_command(self):
+        """Guarda el nuevo comando de monitoreo y lo ejecuta."""
+        new_command = self.monitor_command_input.text().strip()
+        self.monitor_config["monitor_command"] = new_command
+        self.save_data(MONITOR_CONFIG_FILE, self.monitor_config)
+        self.run_monitor_command()
 
     # --- NUEVAS FUNCIONES (Fase 4 - Refactorizado con QScrollArea) ---
 
@@ -1304,6 +1465,27 @@ class CommandManagerGUI(QMainWindow):
 
             # Eliminar de la UI
             self.variable_bank_list.takeItem(self.variable_bank_list.row(current_item))
+
+    def filter_variable_list(self, variables_to_show):
+        """
+        Filtra la lista de variables.
+        - Si `variables_to_show` es una lista, muestra solo esas variables.
+        - Si `variables_to_show` es None, muestra todas las variables (quita el filtro).
+        """
+        is_filtering = variables_to_show is not None
+
+        for i in range(self.variable_bank_list.count()):
+            item = self.variable_bank_list.item(i)
+            if is_filtering:
+                item.setHidden(item.text() not in variables_to_show)
+            else:
+                item.setHidden(False) # Mostrar todo
+
+        self.show_all_vars_button.setVisible(is_filtering)
+
+    def on_show_all_variables(self):
+        """Quita el filtro de la lista de variables."""
+        self.filter_variable_list(None)
 
     # --- Fin de Funciones de Fase 4 ---
     

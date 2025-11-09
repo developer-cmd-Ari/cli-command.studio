@@ -6,11 +6,11 @@
         },
         "Eliminar forzado": {
             "template": "docker rm -f [CONTENEDOR_ID]",
-            "info": "<b>¿Qué hace?</b><br>Fuerza la eliminación de un contenedor, incluso si está en ejecución."
+            "info": "¿Qué hace?\nFuerza la eliminación de un contenedor, incluso si está en ejecución."
         },
         "Eliminar un contenedor": {
             "template": "docker rm [CONTENEDOR_ID]",
-            "info": "<b>¿Qué hace?</b><br>Elimina un contenedor detenido. No puedes eliminar uno en ejecución (primero usa 'stop')."
+            "info": "¿Qué hace?\nElimina un contenedor detenido. No puedes eliminar uno en ejecución (primero usa 'stop')."
         },
         "Ver activos": {
             "template": "docker ps",
@@ -89,6 +89,64 @@
         "Ver Estado de Autenticación": {
             "template": "gh auth status",
             "info": "<b>¿Qué hace?</b><br>Muestra el estado de tu sesión y qué alcances (scopes) tiene tu token."
+        }
+    },
+    "Git": {
+        "Inicializar Repositorio": {
+            "template": "git init",
+            "info": "<b>¿Qué hace?</b><br>Crea un nuevo repositorio Git local en el directorio actual. Necesario para empezar a versionar."
+        },
+        "Añadir Archivos al Staging": {
+            "template": "git add [FILE_PATH]",
+            "info": "<b>¿Qué hace?</b><br>Añade archivos al área de 'staging' (preparación) para incluirlos en el próximo commit.<br><b>Uso:</b> Usa '.' para añadir todos los archivos modificados."
+        },
+        "Commit de Cambios": {
+            "template": "git commit -m \"[COMMIT_MESSAGE]\"",
+            "info": "<b>¿Qué hace?</b><br>Guarda los cambios del área de 'staging' en el historial del repositorio con un mensaje."
+        },
+        "Ver Estado": {
+            "template": "git status",
+            "info": "<b>¿Qué hace?</b><br>Muestra qué archivos han sido modificados, añadidos o están sin seguimiento."
+        },
+        "Ver Diferencias": {
+            "template": "git diff [FILE_PATH]",
+            "info": "<b>¿Qué hace?</b><br>Muestra los cambios que has hecho en los archivos desde el último commit o contra el staging."
+        },
+        "Listar Ramas": {
+            "template": "git branch -a",
+            "info": "<b>¿Qué hace?</b><br>Lista todas las ramas locales y remotas del repositorio."
+        },
+        "Crear y Cambiar a Rama": {
+            "template": "git checkout -b [BRANCH_NAME]",
+            "info": "<b>¿Qué hace?</b><br>Crea una nueva rama local y cambia inmediatamente a ella."
+        },
+        "Cambiar de Rama (Checkout)": {
+            "template": "git checkout [BRANCH_NAME]",
+            "info": "<b>¿Qué hace?</b><br>Cambia a una rama existente."
+        },
+        "Fusionar Ramas (Merge)": {
+            "template": "git merge [BRANCH_NAME]",
+            "info": "<b>¿Qué hace?</b><br>Fusiona la rama especificada en tu rama actual."
+        },
+        "Subir Cambios (Push)": {
+            "template": "git push [REMOTE_NAME] [BRANCH_NAME]",
+            "info": "<b>¿Qué hace?</b><br>Sube tus commits locales a la rama remota especificada."
+        },
+        "Descargar Cambios (Pull)": {
+            "template": "git pull [REMOTE_NAME] [BRANCH_NAME]",
+            "info": "<b>¿Qué hace?</b><br>Descarga e integra los commits de la rama remota a tu rama local."
+        },
+        "Ver Historial Conciso": {
+            "template": "git log --oneline --graph",
+            "info": "<b>¿Qué hace?</b><br>Muestra un historial de commits simple y gráfico."
+        },
+        "Añadir Remoto (Origin)": {
+            "template": "git remote add [REMOTE_NAME] [REMOTE_URL]",
+            "info": "<b>¿Qué hace?</b><br>Añade una URL remota a tu repositorio local."
+        },
+        "Deshacer Último Commit (Soft)": {
+            "template": "git reset --soft [COMMIT_HASH]",
+            "info": "<b>¿Qué hace?</b><br>Deshace el último commit, manteniendo los cambios listos en el área de staging."
         }
     }
 }
