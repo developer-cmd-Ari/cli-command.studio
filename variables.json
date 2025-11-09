@@ -109,9 +109,11 @@
     "ISSUE_STATE": {
         "descripcion": "Estado de las Incidencias (Issues) a listar.",
         "valores": [
-            "open",
+            "all",
             "closed",
-            "all"
+            "git",
+            "main",
+            "open"
         ],
         "default": "open"
     },
@@ -152,9 +154,11 @@
     "BRANCH_NAME": {
         "descripcion": "Nombre de la rama Git a crear, cambiar, fusionar o eliminar.",
         "valores": [
+            "branch",
             "develop",
             "feature/nueva-funcionalidad",
             "main",
+            "master",
             "rama_2"
         ],
         "default": "rama_2"
@@ -171,8 +175,14 @@
     "FILE_PATH": {
         "descripcion": "Ruta de un archivo o directorio. Usar '.' para todos los archivos.",
         "valores": [
+            "\"feat:",
+            "'Añadir'",
+            "'característica'",
             ".",
             "README.md",
+            "file(s)",
+            "git",
+            "known",
             "src/app.py",
             "src/config.json"
         ],
@@ -223,12 +233,8 @@
     },
     "BRANCH_A": {
         "descripcion": "Nombre de la primera rama para comparar (ej: main).",
-        "valores": [
-            "main",
-            "staging",
-            "rama-antigua"
-        ],
-        "default": "main"
+        "valores": [],
+        "default": ""
     },
     "BRANCH_B": {
         "descripcion": "Nombre de la segunda rama para comparar (ej: feature/nueva).",

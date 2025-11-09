@@ -8,9 +8,9 @@ from PySide6.QtWidgets import (
     QDockWidget, QToolBar, QToolButton, QMessageBox, QInputDialog,
     QTabWidget, QListWidgetItem, QStyle, QFormLayout, QComboBox, QLabel,
     QSizePolicy, QSplitter, QTabBar, QMenu, QButtonGroup, QRadioButton,
-    QScrollArea
+    QScrollArea, QCompleter, QLayout
 )
-from PySide6.QtCore import Qt, QProcess, QSize, QObject, Signal
+from PySide6.QtCore import Qt, QProcess, QSize, QObject, Signal, QRect, QPoint
 from PySide6.QtGui import QIcon, QFont, QAction
 
 # --- Estilo Moderno Oscuro (Dark Theme QSS) ---
@@ -184,6 +184,86 @@ QSplitter::handle:hover {
     background-color: #0078d7;
 }
 """
+
+# --- FlowLayout para Tags ---
+# (Adaptado de la documentación oficial de Qt/PySide)
+class FlowLayout(QLayout):
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self.itemList = []
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self.itemList.append(item)
+
+    def count(self):
+        return len(self.itemList)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self.itemList):
+            return self.itemList.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        return self.doLayout(QRect(0, 0, width, 0), True)
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self.doLayout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self.itemList:
+            size = size.expandedTo(item.minimumSize())
+        margin, _, _, _ = self.getContentsMargins()
+        size += QSize(2 * margin, 2 * margin)
+        return size
+
+    def doLayout(self, rect, testOnly):
+        x = rect.x()
+        y = rect.y()
+        lineHeight = 0
+        spaceX = self.spacing()
+        spaceY = self.spacing()
+
+        for item in self.itemList:
+            wid = item.widget()
+            nextX = x + item.sizeHint().width() + spaceX
+            if nextX - spaceX > rect.right() and lineHeight > 0:
+                x = rect.x()
+                y = y + lineHeight + spaceY
+                nextX = x + item.sizeHint().width() + spaceX
+                lineHeight = 0
+
+            if not testOnly:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = nextX
+            lineHeight = max(lineHeight, item.sizeHint().height())
+
+        return y + lineHeight - rect.y()
+
 
 COMMANDS_FILE = "commands.json"
 VARIABLES_FILE = "variables.json"
@@ -376,15 +456,47 @@ class CommandManagerGUI(QMainWindow):
         self.monitor_command_input = QLineEdit(self.monitor_config["monitor_command"])
         self.monitor_command_input.setPlaceholderText("Comando a monitorear...")
         self.save_monitor_cmd_button = QPushButton("Aplicar")
+        self.split_monitor_button = QToolButton()
+        self.split_monitor_button.setText("Dividir")
+        self.split_monitor_button.setToolTip("Convertir salida en tags interactivos")
         monitor_input_layout.addWidget(self.monitor_command_input)
         monitor_input_layout.addWidget(self.save_monitor_cmd_button)
+        monitor_input_layout.addWidget(self.split_monitor_button)
         
         self.monitor_output = QTextEdit()
         self.monitor_output.setReadOnly(True)
         self.monitor_output.setFont(QFont("Consolas", 9))
+
+        # --- Nueva sección de Tags (inicialmente oculta) ---
+        self.tags_section_container = QWidget()
+        tags_section_layout = QVBoxLayout(self.tags_section_container)
         
+        # Selector de variable de destino
+        target_var_layout = QHBoxLayout()
+        target_var_label = QLabel("Enviar tag a:")
+        self.tag_target_variable_combo = QComboBox()
+        self.tag_target_variable_combo.addItems(sorted(self.variables_db.keys()))
+        self.tag_target_variable_combo.setPlaceholderText("Seleccione una variable...")
+        target_var_layout.addWidget(target_var_label)
+        target_var_layout.addWidget(self.tag_target_variable_combo)
+        
+        # Área de scroll para los tags con FlowLayout
+        tags_scroll_area = QScrollArea()
+        tags_scroll_area.setWidgetResizable(True)
+        tags_scroll_area.setStyleSheet("QScrollArea { border: none; background-color: #252525; }")
+        
+        tags_widget = QWidget()
+        self.tags_flow_layout = FlowLayout(tags_widget, 10, 10) # Layout con margen y espaciado
+        tags_scroll_area.setWidget(tags_widget)
+
+        tags_section_layout.addLayout(target_var_layout)
+        tags_section_layout.addWidget(tags_scroll_area)
+        self.tags_section_container.setVisible(False) # Oculto por defecto
+
+        # Ensamblar la pestaña del monitor
         monitor_layout.addLayout(monitor_input_layout)
         monitor_layout.addWidget(self.monitor_output)
+        monitor_layout.addWidget(self.tags_section_container)
         
         # --- Pestaña de Variables (Existente) ---
         self.variables_tab_widget = QWidget()
@@ -538,8 +650,13 @@ class CommandManagerGUI(QMainWindow):
 
         self.run_button = QPushButton("Ejecutar")
         
+        self.send_to_monitor_button = QToolButton()
+        self.send_to_monitor_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_MediaPlay))
+        self.send_to_monitor_button.setToolTip("Enviar comando al monitor y ejecutar")
+
         input_layout.addWidget(self.command_input)
         input_layout.addWidget(self.config_button)
+        input_layout.addWidget(self.send_to_monitor_button)
         input_layout.addWidget(self.run_button)
         main_layout.addLayout(input_layout)
 
@@ -614,11 +731,13 @@ class CommandManagerGUI(QMainWindow):
         self.category_list.currentRowChanged.connect(self.command_stack.setCurrentIndex)
         self.run_button.clicked.connect(self.execute_command)
         self.command_input.returnPressed.connect(self.execute_command)
+        self.send_to_monitor_button.clicked.connect(self.on_send_to_monitor)
         self.config_button.clicked.connect(self.toggle_variable_panel)
 
         # --- Señales del Monitor ---
         self.save_monitor_cmd_button.clicked.connect(self.on_save_monitor_command)
         self.monitor_command_input.returnPressed.connect(self.on_save_monitor_command)
+        self.split_monitor_button.clicked.connect(self.on_toggle_monitor_view)
 
         # Señales de Edición de Comandos (Fase 3)
         self.add_cat_button.clicked.connect(self.on_add_category)
@@ -644,12 +763,72 @@ class CommandManagerGUI(QMainWindow):
         
         # Conecta la señal personalizada para la actualización en vivo
         self.value_editor_signals.valueChanged.connect(self.on_variable_value_changed)
-    
+
+
+    def on_toggle_monitor_view(self):
+        """Muestra/Oculta la sección de tags y los puebla desde la consola."""
+        if self.tags_section_container.isVisible():
+            self.tags_section_container.setVisible(False)
+            self.split_monitor_button.setText("Dividir")
+            self.split_monitor_button.setToolTip("Convertir salida en tags interactivos")
+        else:
+            # Limpiar tags anteriores
+            while self.tags_flow_layout.count():
+                item = self.tags_flow_layout.takeAt(0)
+                widget = item.widget()
+                if widget:
+                    widget.deleteLater()
+
+            text = self.monitor_output.toPlainText()
+            words = re.findall(r'\S+', text)
+            unique_words = sorted(list(set(words)))
+            
+            # Poblar con nuevos tags
+            for word in unique_words:
+                tag_button = QToolButton()
+                tag_button.setText(word)
+                tag_button.setStyleSheet("QToolButton { background-color: #4a4a4a; border-radius: 4px; padding: 5px; } QToolButton:hover { background-color: #5a5a5a; }")
+                tag_button.clicked.connect(lambda checked=False, w=word: self.on_tag_button_clicked(w))
+                self.tags_flow_layout.addWidget(tag_button)
+
+            self.tags_section_container.setVisible(True)
+            self.split_monitor_button.setText("Ocultar")
+            self.split_monitor_button.setToolTip("Ocultar la sección de tags")
+
+    def on_tag_button_clicked(self, word):
+        """Añade el tag (palabra) seleccionado como un valor a la variable elegida en el ComboBox."""
+        var_name = self.tag_target_variable_combo.currentText()
+        if not var_name or var_name not in self.variables_db:
+            self.console_output.append("<i style='color: #ffcc00;'>AVISO: Seleccione una variable válida del desplegable para poder añadir el tag.</i>")
+            return
+            
+        # Añadir el valor si no existe
+        if word not in self.variables_db[var_name]["valores"]:
+            self.variables_db[var_name]["valores"].append(word)
+            self.variables_db[var_name]["valores"].sort()
+            self.save_data(VARIABLES_FILE, self.variables_db)
+            self.console_output.append(f"Valor '{word}' añadido a la variable '[{var_name}]'.")
+        else:
+            self.console_output.append(f"<i style='color: #ffcc00;'>AVISO: El valor '{word}' ya existe para la variable '[{var_name}]'.</i>")
+
+    def on_send_to_monitor(self):
+        """Toma el comando actual y lo envía a la pestaña de monitoreo."""
+        command_to_monitor = self.command_input.text()
+        if not command_to_monitor:
+            return
+        
+        # Actualizar el input en la pestaña de monitor
+        self.monitor_command_input.setText(command_to_monitor)
+        
+        # Guardar y ejecutar el comando en el monitor
+        self.on_save_monitor_command()
+        
+        # Cambiar a la pestaña de monitor para ver el resultado
+        self.info_tabs.setCurrentWidget(self.monitor_tab_widget)
     # --- Slots de Búsqueda y Filtro de Variables ---
     def on_variable_search_changed(self):
         """Se activa cuando el texto de búsqueda de variables cambia."""
         self.apply_variable_filters()
-
     def apply_variable_filters(self):
         """Aplica los filtros de comando y búsqueda a la lista de variables."""
         search_text = self.variable_search_bar.text().lower()
@@ -677,6 +856,14 @@ class CommandManagerGUI(QMainWindow):
         """
         self.current_command_filter_vars = variables_to_show
         self.show_all_vars_button.setVisible(variables_to_show is not None)
+
+        # Actualizar también el ComboBox en la pestaña de Monitor
+        self.tag_target_variable_combo.clear()
+        if variables_to_show is not None:
+            self.tag_target_variable_combo.addItems(sorted(variables_to_show))
+        else:
+            self.tag_target_variable_combo.addItems(sorted(self.variables_db.keys()))
+
         self.apply_variable_filters()
 
     def on_show_all_variables(self):
