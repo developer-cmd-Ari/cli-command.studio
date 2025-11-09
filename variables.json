@@ -2,10 +2,9 @@
     "TU_USUARIO": {
         "descripcion": "Usuario de GitHub o Docker Hub usado para login y tags.",
         "valores": [
+            "tu_usuario_docker",
             "ariel",
-            "juan",
-            "pedro",
-            "tu_usuario_docker"
+            "juan"
         ],
         "default": "tu_usuario_docker"
     },
@@ -36,16 +35,16 @@
     "ID_O_TAG": {
         "descripcion": "ID o Tag de una imagen local de Docker.",
         "valores": [
-            "imagen_id",
-            "mi-app:latest"
+            "mi-app:latest",
+            "imagen_id"
         ],
         "default": "mi-app:latest"
     },
     "REPO_OWNER": {
         "descripcion": "Usuario o de la organización dueña del repositorio en GitHub.",
         "valores": [
-            "mi-organizacion",
-            "tu_usuario_github"
+            "tu_usuario_github",
+            "mi-organizacion"
         ],
         "default": "tu_usuario_github"
     },
@@ -143,33 +142,34 @@
     "COMMIT_MESSAGE": {
         "descripcion": "Mensaje descriptivo para el commit de Git.",
         "valores": [
+            "docs: Actualizar README",
             "feat: Añadir característica X",
             "fix: Corregir error de login",
-            "docs: Actualizar README"
+            "refactor: Limpieza de código"
         ],
         "default": "feat: Añadir característica X"
     },
     "BRANCH_NAME": {
-        "descripcion": "Nombre de la rama Git a crear, cambiar o fusionar.",
+        "descripcion": "Nombre de la rama Git a crear, cambiar, fusionar o eliminar.",
         "valores": [
-            "main",
             "develop",
             "feature/nueva-funcionalidad",
-            "fix/bug-critico"
+            "main",
+            "rama_2"
         ],
-        "default": "develop"
+        "default": "rama_2"
     },
     "REMOTE_NAME": {
         "descripcion": "Nombre del repositorio remoto (ej: 'origin').",
         "valores": [
-            "origin",
-            "upstream",
-            "mi-servidor"
+            "https://github.com/developer-cmd-Ari/app-dev",
+            "mi-servidor",
+            "upstream"
         ],
-        "default": "origin"
+        "default": "https://github.com/developer-cmd-Ari/app-dev"
     },
     "FILE_PATH": {
-        "descripcion": "Ruta de un archivo o directorio. Usar '.' para todos.",
+        "descripcion": "Ruta de un archivo o directorio. Usar '.' para todos los archivos.",
         "valores": [
             ".",
             "README.md",
@@ -186,13 +186,64 @@
         ],
         "default": "git@github.com:usuario/repo.git"
     },
-    "COMMIT_HASH": {
-        "descripcion": "Hash corto, completo o referencia (~HEAD) del commit.",
+    "STASH_MESSAGE": {
+        "descripcion": "Mensaje descriptivo para el stash de Git.",
         "valores": [
-            "HEAD^",
-            "a1b2c3d",
-            "HEAD~3"
+            "WIP: Cambios de feature X",
+            "Limpieza de código",
+            "Antes de pull"
         ],
-        "default": "HEAD^"
+        "default": "WIP: Cambios de feature X"
+    },
+    "NUMERO_COMMITS": {
+        "descripcion": "Número de commits a deshacer (ej: 1 para el último).",
+        "valores": [
+            "1",
+            "2"
+        ],
+        "default": "1"
+    },
+    "VARIABLE_CONFIG": {
+        "descripcion": "Nombre de la variable de configuración global (ej: user.name, user.email).",
+        "valores": [
+            "user.name",
+            "user.email",
+            "core.editor"
+        ],
+        "default": "user.name"
+    },
+    "VALOR_CONFIG": {
+        "descripcion": "Valor a establecer para la variable de configuración.",
+        "valores": [
+            "Tu Nombre",
+            "tu.email@ejemplo.com",
+            "nano"
+        ],
+        "default": "Tu Nombre"
+    },
+    "BRANCH_A": {
+        "descripcion": "Nombre de la primera rama para comparar (ej: main).",
+        "valores": [
+            "main",
+            "staging",
+            "rama-antigua"
+        ],
+        "default": "main"
+    },
+    "BRANCH_B": {
+        "descripcion": "Nombre de la segunda rama para comparar (ej: feature/nueva).",
+        "valores": [
+            "feature/nueva-funcionalidad",
+            "hotfix/bug-critico"
+        ],
+        "default": "feature/nueva-funcionalidad"
+    },
+    "BRANCH_BASE": {
+        "descripcion": "Rama base sobre la que se hará el rebase.",
+        "valores": [
+            "main",
+            "develop"
+        ],
+        "default": "main"
     }
 }

@@ -527,7 +527,8 @@ class CommandManagerGUI(QMainWindow):
         input_layout = QHBoxLayout()
         self.command_input = QLineEdit()
         self.command_input.setPlaceholderText("Selecciona un comando para ver la vista previa...")
-        self.command_input.setReadOnly(True)
+        # self.command_input.setReadOnly(True) # Ahora es editable
+
 
         self.config_button = QToolButton()
         icon = self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogContentsView)
@@ -1067,48 +1068,76 @@ class CommandManagerGUI(QMainWindow):
         """Muestra u oculta el panel de configuración de variables."""
         self.variable_config_panel.setVisible(not self.variable_config_panel.isVisible())
 
+    def on_duplicate_variable_clicked(self, index_to_duplicate):
+        """Duplica un placeholder de variable en la plantilla de comando."""
+        matches = list(re.finditer(r'\[([^\]]+)\]', self.current_template))
+        
+        if index_to_duplicate >= len(matches):
+            return
+
+        match_to_duplicate = matches[index_to_duplicate]
+        placeholder_text = match_to_duplicate.group(0)
+        insert_pos = match_to_duplicate.end()
+
+        self.current_template = (self.current_template[:insert_pos] + 
+                                 " " + placeholder_text + 
+                                 self.current_template[insert_pos:])
+
+        # Guardar los valores actuales para restaurarlos después de reconstruir la UI
+        current_values = [widget.text() for widget in self.dynamic_variable_widgets]
+        
+        self.build_variable_widgets()
+        
+        # Restaurar los valores y añadir uno vacío para el nuevo duplicado
+        new_values = current_values[:index_to_duplicate+1] + [""] + current_values[index_to_duplicate+1:]
+        for widget, value in zip(self.dynamic_variable_widgets, new_values):
+            widget.setText(value)
+
+        self.update_command_preview()
+
     def build_variable_widgets(self):
-        """Limpia y reconstruye el panel de variables basado en el self.current_template."""
+        """Limpia y reconstruye el panel de variables basado en el self.current_template, permitiendo duplicados."""
         self.clear_layout(self.variable_config_layout)
-        self.dynamic_variable_widgets.clear()
+        self.dynamic_variable_widgets = [] # Cambiado a una lista
 
         variables = re.findall(r'\[([^\]]+)\]', self.current_template)
-        unique_variables = sorted(list(set(variables)))
 
-        if not unique_variables:
+        if not variables:
             self.config_button.setVisible(False)
             return
 
         self.config_button.setVisible(True)
-
-        for var_name in unique_variables:
+        
+        seen_vars = set()
+        for i, var_name in enumerate(variables):
             label = QLabel(f"{var_name}:")
             
-            # Contenedor para el QLineEdit y el botón de selección
             input_container = QWidget()
             container_layout = QHBoxLayout(input_container)
             container_layout.setContentsMargins(0, 0, 0, 0)
             container_layout.setSpacing(4)
 
-            # Usar siempre QLineEdit para la entrada de texto
             widget = QLineEdit()
             widget.textChanged.connect(self.update_command_preview)
             container_layout.addWidget(widget)
-            self.dynamic_variable_widgets[var_name] = widget
+            self.dynamic_variable_widgets.append(widget)
 
             has_values = var_name in self.variables_db and self.variables_db[var_name].get("valores")
 
             if has_values:
                 var_info = self.variables_db[var_name]
                 
-                # Establecer valor por defecto
-                default_value = var_info.get("default", "")
-                if default_value:
-                    widget.setText(default_value)
+                # Aplicar valor por defecto solo a la primera aparición de la variable
+                if var_name not in seen_vars:
+                    default_value = var_info.get("default", "")
+                    if default_value:
+                        widget.setText(default_value)
+                    elif var_info["valores"]:
+                        widget.setPlaceholderText(f"Ej: {var_info['valores'][0]}")
+                    seen_vars.add(var_name)
                 elif var_info["valores"]:
-                    widget.setPlaceholderText(f"Ej: {var_info['valores'][0]}")
+                     widget.setPlaceholderText(f"Ej: {var_info['valores'][0]}")
 
-                # Botón para mostrar el menú de valores
                 picker_button = QToolButton()
                 picker_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown))
                 picker_button.setToolTip("Seleccionar un valor predefinido")
@@ -1124,29 +1153,28 @@ class CommandManagerGUI(QMainWindow):
             else:
                 widget.setPlaceholderText(f"Valor para {var_name}")
 
+            # Botón para duplicar
+            duplicate_button = QToolButton()
+            duplicate_button.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogNewFolder))
+            duplicate_button.setToolTip(f"Duplicar argumento [{var_name}]")
+            duplicate_button.clicked.connect(lambda checked=False, index=i: self.on_duplicate_variable_clicked(index))
+            container_layout.addWidget(duplicate_button)
+
             self.variable_config_layout.addRow(label, input_container)
 
     def update_command_preview(self):
-        """Actualiza el QLineEdit de vista previa (self.command_input) con los valores actuales."""
-        resolved_command = self.current_template
+        """Actualiza el QLineEdit de vista previa, manejando placeholders duplicados."""
+        widget_iter = iter(self.dynamic_variable_widgets)
         
-        for var_name, widget in self.dynamic_variable_widgets.items():
-            # Obtener el valor, ya sea de QComboBox o QLineEdit
-            value = ""
-            if isinstance(widget, QComboBox):
-                value = widget.currentText()
-            elif isinstance(widget, QLineEdit):
+        def replacer(match):
+            try:
+                widget = next(widget_iter)
                 value = widget.text()
-            
-            # Si el valor está vacío, mantenemos el placeholder en el comando
-            if not value:
-                value_to_replace = f"[{var_name}]"
-            else:
-                value_to_replace = value
+                return value if value else match.group(0)
+            except StopIteration:
+                return match.group(0)
 
-            # Reemplazar todas las instancias de la variable en la plantilla
-            resolved_command = resolved_command.replace(f"[{var_name}]", value_to_replace)
-            
+        resolved_command = re.sub(r'\[([^\]]+)\]', replacer, self.current_template)
         self.command_input.setText(resolved_command)
 
     def clear_layout(self, layout):
